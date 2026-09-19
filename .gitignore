@@ -3,6 +3,7 @@ node_modules/
 desktop/renderer/bundle.js
 desktop/renderer/bundle.js.map
 desktop/dist/
+desktop/.tmp-integration-result.json
 signaling/.env
 desktop/.env
 __pycache__/

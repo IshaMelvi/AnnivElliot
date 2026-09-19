@@ -13,41 +13,75 @@
     <div class="join-card">
       <span class="badge">✦ ANNIVELLIOT</span>
       <h1>Regardons ça ensemble.</h1>
-      <p>Choisissez le même nom de salon, puis partagez vos écrans et vos sourires.</p>
+      <p>Entre dans un salon avec ton micro. Tu pourras activer la webcam et partager ton écran quand tu le souhaites.</p>
       <form id="join-form">
         <label for="room">Nom du salon partagé</label>
         <input id="room" name="room" type="text" minlength="6" maxlength="100" autocomplete="off" placeholder="Notre soirée secrète..." required>
-        <button class="primary" type="submit">Choisir un écran →</button>
+        <button class="primary" type="submit">Entrer dans le salon →</button>
       </form>
-      <p class="hint">Utilisez un nom long et difficile à deviner. Il sert de secret entre vous.</p>
+      <p class="hint">Utilise un nom long et difficile à deviner. Il sert de secret entre vous.</p>
       <p id="join-status" class="message" role="status"></p>
     </div>
   </main>
 
-  <section id="picker" class="picker" hidden aria-labelledby="picker-title">
+  <section id="picker" class="picker" hidden role="dialog" aria-modal="true" aria-labelledby="picker-title">
     <div class="picker-card">
-      <h2 id="picker-title">Quel écran partager ?</h2>
-      <p>La webcam et le micro seront également demandés après votre choix.</p>
-      <div id="sources" class="sources"></div>
-      <button id="back" class="text-button" type="button">← Retour</button>
+      <div class="picker-heading">
+        <div><h2 id="picker-title">Partager mon écran</h2><p>Choisis une fenêtre ou un écran entier.</p></div>
+        <button id="picker-close" class="picker-close" type="button" aria-label="Fermer">×</button>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Type de source">
+        <button id="tab-window" class="tab" type="button" role="tab" aria-selected="true">Fenêtres</button>
+        <button id="tab-screen" class="tab" type="button" role="tab" aria-selected="false">Écrans entiers</button>
+      </div>
+      <div id="sources" class="sources" role="group" aria-label="Sources disponibles"></div>
+      <div class="quality">
+        <fieldset><legend>Résolution</legend>
+          <label><input type="radio" name="resolution" value="720" checked> 720p</label>
+          <label><input type="radio" name="resolution" value="1080"> 1080p</label>
+        </fieldset>
+        <fieldset><legend>Fluidité</legend>
+          <label><input type="radio" name="fps" value="30" checked> 30 fps</label>
+          <label><input type="radio" name="fps" value="60"> 60 fps</label>
+        </fieldset>
+      </div>
+      <p id="picker-status" class="message" role="status"></p>
+      <button id="start-share" class="primary" type="button" disabled>Démarrer le partage</button>
     </div>
   </section>
 
   <main id="call" class="call" hidden>
     <div id="stage" class="stage">
       <video id="main-video" autoplay playsinline></video>
+      <audio id="remote-mic" autoplay></audio>
       <div id="empty-stage" class="empty-stage">En attente de l'autre personne…</div>
-      <div id="pip" class="pip" role="button" tabindex="0" aria-label="Inverser les vidéos">
+      <div id="pip" class="pip" role="button" tabindex="0" aria-label="Inverser les vidéos" hidden>
         <video id="pip-video" autoplay playsinline></video>
         <span id="pip-label" class="pip-label">Webcam</span>
         <span class="corner" aria-hidden="true">⤢</span>
       </div>
     </div>
-    <div class="toolbar">
+    <div class="overlay overlay-top">
       <div class="room-info"><span class="pulse"></span><div><strong>Salon privé</strong><span id="call-status" role="status">Connexion…</span></div></div>
+    </div>
+    <div id="toolbar" class="overlay toolbar">
       <div class="actions">
-        <button id="mute" class="control" type="button" aria-pressed="false">🎙 Couper mon micro</button>
-        <button id="leave" class="control danger" type="button">Quitter</button>
+        <button id="mute" class="control" type="button" aria-label="Couper mon micro" title="Couper mon micro" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/><path class="off-mark" d="M3 21 21 3"/></svg>
+        </button>
+        <button id="camera" class="control is-off" type="button" aria-label="Activer ma webcam" title="Activer ma webcam" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/><path class="off-mark" d="M3 21 21 3"/></svg>
+        </button>
+        <button id="share" class="control" type="button" aria-label="Partager mon écran" title="Partager mon écran" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-5M8 22h8m-4-3v3"/><path d="M15 2h7v7m0-7-9 9"/></svg>
+        </button>
+        <span class="divider" aria-hidden="true"></span>
+        <button id="fullscreen" class="control" type="button" aria-label="Passer en plein écran" title="Passer en plein écran" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H3v6m0-6 7 7m5-7h6v6m0-6-7 7M3 15v6h6m-6 0 7-7m11 1v6h-6m6 0-7-7"/></svg>
+        </button>
+        <button id="leave" class="control danger" type="button" aria-label="Quitter le salon" title="Quitter le salon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10v16H4zM10 12h11m-4-4 4 4-4 4"/></svg>
+        </button>
       </div>
     </div>
   </main>

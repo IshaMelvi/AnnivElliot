@@ -55,12 +55,18 @@ Dans GitHub, active **Settings → Pages → Deploy from a branch → main → /
 
 ## 3. Application Electron
 
-Dans [desktop/renderer/app.js](desktop/renderer/app.js), remplace `https://VOTRE-SERVICE.onrender.com` par l'URL HTTPS du serveur Render. Pour un essai local, utilise `http://localhost:3000`.
+L'URL du serveur Render déjà utilisé est définie dans [desktop/renderer/app.js](desktop/renderer/app.js). Pour un essai avec un serveur local, remplace-la provisoirement par `http://localhost:3000`.
 
 ```powershell
 cd desktop
 npm.cmd install
 npm.cmd start
+```
+
+Pour vérifier la connexion et les changements de flux sans utiliser de vrais périphériques, le test d'intégration lance deux fenêtres Electron masquées et un serveur local avec des médias synthétiques :
+
+```powershell
+npm.cmd run test:integration
 ```
 
 Sur Windows, pour produire l'installateur :
@@ -69,12 +75,13 @@ Sur Windows, pour produire l'installateur :
 npm.cmd run build:win
 ```
 
-Le fichier `desktop/dist/AnnivElliot-Setup.exe` est à téléverser dans une GitHub Release publiée. Le lien du site fonctionnera alors. Pour tester avec deux personnes, installez l'application chacun sur votre ordinateur, choisissez le même nom de salon, une source d'écran, puis autorisez la webcam et le micro. Un nom long et difficile à deviner sert de secret partagé.
+Le fichier `desktop/dist/AnnivElliot-Setup.exe` est à téléverser dans une GitHub Release publiée. Le lien du site fonctionnera alors. Pour tester avec deux personnes, lancez chacun l'application et choisissez le même nom de salon. Seul le micro est demandé à l'entrée ; la webcam et l'écran s'activent ensuite par leurs boutons. Un nom long et difficile à deviner sert de secret partagé.
 
 ## Fonctionnement et limites
 
-- Chaque personne envoie son écran et sa webcam, et reçoit les deux flux de l'autre. La deuxième personne qui rejoint le salon initie l'offre WebRTC ; les deux peuvent ensuite émettre et regarder.
-- L'écran vise 1920 × 1080 à 30 images/s, avec plafond vidéo de 8 Mbit/s. Ces réglages sont des préférences et un maximum de débit ; la source, le réseau et le matériel peuvent réduire la qualité réelle.
+- Chaque personne envoie son micro dès l'entrée du salon. La webcam démarre désactivée et sa capture est arrêtée quand on la coupe. L'écran est partagé seulement après un choix explicite. Les deux personnes peuvent ensuite émettre et regarder.
+- Les commandes du salon apparaissent au mouvement de la souris puis s'effacent après quelques secondes. Le bouton écran ouvre les onglets **Fenêtres** et **Écrans entiers**, suivis des choix 720p/1080p et 30/60 fps. Le bouton plein écran affiche l'application sans les bordures de la fenêtre.
+- Les plafonds vidéo du partage sont de 4 Mbit/s (720p30), 6 Mbit/s (720p60), 8 Mbit/s (1080p30) et 12 Mbit/s (1080p60). Ce sont des limites et des préférences, pas des débits ou résolutions garantis. À 60 fps, l'encodage demande davantage de calcul et généralement plus de débit ; à débit fixe, chaque image reçoit moins de données et peut paraître moins nette.
 - L'audio système via `loopback` est officiellement pris en charge par l'API Electron utilisée ici sur Windows. Cette version cible Windows et ne construit qu'un installateur Windows ; macOS/Linux demanderaient des adaptations, notamment pour l'audio système et les permissions de capture.
 - STUN seul ne permet pas de franchir tous les NAT et pare-feu. Si les deux personnes ne se connectent pas en WebRTC, il faut ajouter un serveur TURN. Dans ce cas, les médias passeraient par ce relais ; le serveur de signalisation reste un simple pont.
 - Le flux est chiffré par WebRTC. Le nom du salon est envoyé au serveur sous forme de SHA-256, mais il ne s'agit pas d'une authentification forte : utilisez un secret long et partagez-le en privé.

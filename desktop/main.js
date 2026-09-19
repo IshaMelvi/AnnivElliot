@@ -59,6 +59,7 @@ app.whenReady().then(() => {
     return found.map((source) => ({
       id: source.id,
       name: source.name,
+      kind: source.id.startsWith('screen:') ? 'screen' : 'window',
       thumbnail: source.thumbnail.toDataURL()
     }));
   });
@@ -70,6 +71,15 @@ app.whenReady().then(() => {
     selectedSource = sources.get(id);
     sources.clear();
   });
+
+  ipcMain.handle('toggle-fullscreen', (event) => {
+    if (!ownWindow(event)) throw new Error('Accès refusé.');
+    window.setFullScreen(!window.isFullScreen());
+    return window.isFullScreen();
+  });
+
+  window.on('enter-full-screen', () => window?.webContents.send('fullscreen-state', true));
+  window.on('leave-full-screen', () => window?.webContents.send('fullscreen-state', false));
 
   window.on('closed', () => { window = null; });
   window.loadFile(path.join(__dirname, 'renderer', 'index.html'));
