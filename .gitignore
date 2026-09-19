@@ -1,4 +1,10 @@
 # Byte-compiled / optimized / DLL files
+node_modules/
+desktop/renderer/bundle.js
+desktop/renderer/bundle.js.map
+desktop/dist/
+signaling/.env
+desktop/.env
 __pycache__/
 *.py[codz]
 *$py.class

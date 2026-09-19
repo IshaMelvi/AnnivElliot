@@ -1,0 +1,29 @@
+{
+  "name": "annivelliot-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Partage d'écran, de webcam et d'audio pour deux amis",
+  "main": "main.js",
+  "scripts": {
+    "build:renderer": "esbuild renderer/app.js --bundle --platform=browser --format=iife --outfile=renderer/bundle.js",
+    "prestart": "npm run build:renderer",
+    "start": "electron .",
+    "build:win": "npm run build:renderer && electron-builder --win nsis"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2"
+  },
+  "build": {
+    "appId": "ch.annivelliot.stream",
+    "productName": "AnnivElliot",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "renderer/index.html", "renderer/style.css", "renderer/bundle.js"],
+    "win": { "target": "nsis", "artifactName": "AnnivElliot-Setup.${ext}" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}

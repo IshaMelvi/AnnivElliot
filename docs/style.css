@@ -1,0 +1,14 @@
+:root { font-family: system-ui, -apple-system, Segoe UI, sans-serif; color: #fff; background: #19152f; }
+* { box-sizing: border-box; }
+body { min-height: 100vh; margin: 0; padding: 20px 0; display: grid; place-items: center; overflow-x: hidden; background: radial-gradient(circle at 22% 18%, #6544a0 0, transparent 34%), radial-gradient(circle at 85% 82%, #8a365f 0, transparent 34%), #19152f; }
+#confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.card { position: relative; width: min(92vw, 650px); padding: clamp(2rem, 6vw, 4.5rem); text-align: center; border: 1px solid #ffffff35; border-radius: 30px; background: #ffffff12; box-shadow: 0 25px 80px #0b082889; backdrop-filter: blur(20px); }
+.eyebrow { color: #ffd0e9; font-size: .82rem; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
+.gift { margin: 1.2rem 0 .4rem; font-size: 4.5rem; animation: float 3s ease-in-out infinite; }
+h1 { margin: .2rem 0 .8rem; font-size: clamp(2.4rem, 7vw, 4.5rem); line-height: 1.1; letter-spacing: -.05em; }
+p { max-width: 450px; margin: 0 auto 2rem; color: #eee5fa; line-height: 1.65; }
+.download { display: inline-flex; align-items: center; justify-content: center; gap: .7rem; min-height: 56px; padding: .8rem 1.5rem; border-radius: 16px; color: #21162f; background: linear-gradient(110deg, #ffe4aa, #ffaad6); font-weight: 800; text-decoration: none; box-shadow: 0 8px 26px #f98ac855; transition: transform .2s, box-shadow .2s; }
+.download:hover, .download:focus-visible { transform: translateY(-3px); box-shadow: 0 14px 35px #f98ac877; }
+small { display: block; margin-top: 1.3rem; color: #d3c6e2; }
+@keyframes float { 50% { transform: translateY(-8px) rotate(5deg); } }
+@media (prefers-reduced-motion: reduce) { .gift { animation: none; } .download { transition: none; } }

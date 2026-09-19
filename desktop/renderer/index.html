@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https: wss: http://localhost:3000 ws://localhost:3000; media-src 'self' blob:; object-src 'none'">
+  <title>AnnivElliot — Salon privé</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="bundle.js" defer></script>
+</head>
+<body>
+  <main id="join" class="join">
+    <div class="join-card">
+      <span class="badge">✦ ANNIVELLIOT</span>
+      <h1>Regardons ça ensemble.</h1>
+      <p>Choisissez le même nom de salon, puis partagez vos écrans et vos sourires.</p>
+      <form id="join-form">
+        <label for="room">Nom du salon partagé</label>
+        <input id="room" name="room" type="text" minlength="6" maxlength="100" autocomplete="off" placeholder="Notre soirée secrète..." required>
+        <button class="primary" type="submit">Choisir un écran →</button>
+      </form>
+      <p class="hint">Utilisez un nom long et difficile à deviner. Il sert de secret entre vous.</p>
+      <p id="join-status" class="message" role="status"></p>
+    </div>
+  </main>
+
+  <section id="picker" class="picker" hidden aria-labelledby="picker-title">
+    <div class="picker-card">
+      <h2 id="picker-title">Quel écran partager ?</h2>
+      <p>La webcam et le micro seront également demandés après votre choix.</p>
+      <div id="sources" class="sources"></div>
+      <button id="back" class="text-button" type="button">← Retour</button>
+    </div>
+  </section>
+
+  <main id="call" class="call" hidden>
+    <div id="stage" class="stage">
+      <video id="main-video" autoplay playsinline></video>
+      <div id="empty-stage" class="empty-stage">En attente de l'autre personne…</div>
+      <div id="pip" class="pip" role="button" tabindex="0" aria-label="Inverser les vidéos">
+        <video id="pip-video" autoplay playsinline></video>
+        <span id="pip-label" class="pip-label">Webcam</span>
+        <span class="corner" aria-hidden="true">⤢</span>
+      </div>
+    </div>
+    <div class="toolbar">
+      <div class="room-info"><span class="pulse"></span><div><strong>Salon privé</strong><span id="call-status" role="status">Connexion…</span></div></div>
+      <div class="actions">
+        <button id="mute" class="control" type="button" aria-pressed="false">🎙 Couper mon micro</button>
+        <button id="leave" class="control danger" type="button">Quitter</button>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
