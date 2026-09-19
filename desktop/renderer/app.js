@@ -8,6 +8,7 @@ const BITRATES = { '720-30': 4_000_000, '720-60': 6_000_000,
 const $ = (selector) => document.querySelector(selector);
 const join = $('#join');
 const joinForm = $('#join-form');
+const displayNameInput = $('#display-name');
 const roomInput = $('#room');
 const joinStatus = $('#join-status');
 const picker = $('#picker');
@@ -19,15 +20,85 @@ const callStatus = $('#call-status');
 const mainVideo = $('#main-video');
 const pipVideo = $('#pip-video');
 const remoteMic = $('#remote-mic');
+const remoteSystem = $('#remote-system');
+const splitView = $('#split-view');
+const splitRemote = $('#split-remote');
+const splitLocal = $('#split-local');
+const splitRemoteVideo = $('#split-remote-video');
+const splitLocalVideo = $('#split-local-video');
+const splitRemoteEmpty = $('#split-remote-empty');
+const splitLocalEmpty = $('#split-local-empty');
+const mainMute = $('#main-mute');
+const splitMute = $('#split-mute');
+const pipMute = $('#pip-mute');
 const pip = $('#pip');
 const pipLabel = $('#pip-label');
+const pipResize = $('#pip-resize');
+const localPip = $('#local-pip');
+const localPipVideo = $('#local-pip-video');
+const localPipLabel = $('#local-pip-label');
+const localPipResize = $('#local-pip-resize');
 const stage = $('#stage');
 const emptyStage = $('#empty-stage');
+const emptyStageText = $('#empty-stage-text');
 const toolbar = $('#toolbar');
 const muteButton = $('#mute');
 const cameraButton = $('#camera');
 const shareButton = $('#share');
 const fullscreenButton = $('#fullscreen');
+const selfName = $('#self-name');
+const selfAvatar = $('#self-avatar');
+const remotePerson = $('#remote-person');
+const remoteName = $('#remote-name');
+const remoteAvatar = $('#remote-avatar');
+const remoteState = $('#remote-state');
+const remoteMutedMark = $('#remote-muted-mark');
+const personMenu = $('#person-menu');
+const personMenuName = $('#person-menu-name');
+const personVolumeInput = $('#person-volume');
+const personVolumeValue = $('#person-volume-value');
+const personMuteButton = $('#person-mute');
+const videoVolumeInput = $('#video-volume');
+const videoVolumeValue = $('#video-volume-value');
+const PROFILE_KEY = 'annivelliot.profile.v1';
+
+function volumeOr(value, fallback) {
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : fallback;
+}
+
+function loadProfile() {
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(PROFILE_KEY)) || {}; }
+  catch (error) { console.warn('Profil local illisible :', error); }
+  const quality = stored.quality || {};
+  return {
+    id: typeof stored.id === 'string' && /^[0-9a-f-]{36}$/i.test(stored.id)
+      ? stored.id : crypto.randomUUID(),
+    displayName: typeof stored.displayName === 'string' ? stored.displayName.slice(0, 32) : '',
+    defaultVideoVolume: volumeOr(stored.defaultVideoVolume, 100),
+    quality: { height: quality.height === 1080 ? 1080 : 720, fps: quality.fps === 60 ? 60 : 30 },
+    friends: stored.friends && typeof stored.friends === 'object' && !Array.isArray(stored.friends)
+      ? stored.friends : {}
+  };
+}
+
+let profile = loadProfile();
+function saveProfile() {
+  try { localStorage.setItem(PROFILE_KEY, JSON.stringify(profile)); }
+  catch (error) { console.warn('Enregistrement du profil impossible :', error); }
+}
+saveProfile();
+displayNameInput.value = profile.displayName;
+for (const radio of document.querySelectorAll('input[name="resolution"]')) {
+  radio.checked = Number(radio.value) === profile.quality.height;
+}
+for (const radio of document.querySelectorAll('input[name="fps"]')) {
+  radio.checked = Number(radio.value) === profile.quality.fps;
+}
+displayNameInput.addEventListener('input', () => {
+  profile.displayName = displayNameInput.value.trim().slice(0, 32);
+  saveProfile();
+});
 
 let roomHash = null;
 let socket = null;
@@ -44,13 +115,21 @@ let remoteStreams = new Map();
 let pendingIce = [];
 let signalQueue = Promise.resolve();
 let cameraIsMain = false;
+let localCameraIsMain = false;
+let viewMode = 'remote';
+let displayName = profile.displayName;
+let remotePresent = false;
+let personVolume = 100;
+let personMuted = false;
+let videoVolume = profile.defaultVideoVolume;
+let activeRemoteKey = null;
 let audioWarning = '';
 let busy = false;
 let sessionVersion = 0;
 let allSources = [];
 let activeTab = 'window';
 let selectedSourceId = null;
-let screenSettings = { height: 720, fps: 30 };
+let screenSettings = { ...profile.quality };
 let hideTimer = null;
 
 function status(message) {
@@ -73,11 +152,100 @@ function setButton(button, active, activeLabel, inactiveLabel, slashWhenInactive
 
 function refreshButtons() {
   const micOn = Boolean(micStream?.getAudioTracks()[0]?.enabled);
-  setButton(muteButton, !micOn, 'Réactiver mon micro', 'Couper mon micro');
-  muteButton.classList.toggle('is-off', !micOn);
+  setButton(muteButton, micOn, 'Couper mon micro', 'Réactiver mon micro', true);
   setButton(cameraButton, Boolean(cameraStream), 'Désactiver ma webcam', 'Activer ma webcam', true);
   setButton(shareButton, Boolean(screenStream), 'Arrêter le partage', 'Partager mon écran');
 }
+
+function remoteSettingsKey(map) {
+  if (typeof map?.profileId === 'string' && /^[0-9a-f-]{36}$/i.test(map.profileId)) {
+    return 'id:' + map.profileId.toLowerCase();
+  }
+  const name = typeof map?.displayName === 'string' ? map.displayName.trim().toLocaleLowerCase() : '';
+  return name ? 'name:' + name.slice(0, 32) : null;
+}
+
+function selectRemoteSettings(map) {
+  const key = remoteSettingsKey(map);
+  if (key === activeRemoteKey) return;
+  activeRemoteKey = key;
+  const saved = key ? profile.friends[key] : null;
+  personVolume = volumeOr(saved?.personVolume, 100);
+  personMuted = saved?.personMuted === true;
+  videoVolume = volumeOr(saved?.videoVolume, profile.defaultVideoVolume);
+  personVolumeInput.value = String(personVolume);
+  videoVolumeInput.value = String(videoVolume);
+  applyIncomingVolume();
+}
+
+function saveFriendSettings() {
+  if (activeRemoteKey) {
+    profile.friends[activeRemoteKey] = { personVolume, personMuted, videoVolume };
+  } else {
+    profile.defaultVideoVolume = videoVolume;
+  }
+  saveProfile();
+}
+
+function updateRoster() {
+  selfName.textContent = displayName || 'Vous';
+  selfAvatar.textContent = (displayName || 'Vous').charAt(0).toLocaleUpperCase();
+  remotePerson.hidden = !remotePresent;
+  const name = typeof remoteMap?.displayName === 'string' && remoteMap.displayName.trim()
+    ? remoteMap.displayName.trim().slice(0, 32) : 'Votre ami';
+  remoteName.textContent = name;
+  remoteAvatar.textContent = name.charAt(0).toLocaleUpperCase();
+  personMenuName.textContent = name;
+  remoteState.textContent = peer?.connectionState === 'connected' ? 'Connecté' : 'Connexion…';
+  remoteMutedMark.hidden = !personMuted && personVolume > 0;
+  if (!remotePresent) personMenu.hidden = true;
+}
+
+function applyIncomingVolume() {
+  const personLevel = personMuted ? 0 : personVolume / 100;
+  remoteMic.volume = personLevel;
+  remoteSystem.volume = personLevel * videoVolume / 100;
+  personVolumeValue.textContent = personVolume + ' %';
+  videoVolumeValue.textContent = videoVolume + ' %';
+  personMuteButton.setAttribute('aria-pressed', String(personMuted));
+  personMuteButton.textContent = personMuted ? 'Rétablir le son' : 'Rendre muet';
+  updateRoster();
+}
+
+function openPersonMenu() {
+  if (!remotePresent) return;
+  personMenu.hidden = false;
+  updateRoster();
+}
+
+remotePerson.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  openPersonMenu();
+});
+remotePerson.addEventListener('click', () => {
+  personMenu.hidden = !personMenu.hidden;
+  updateRoster();
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!personMenu.contains(event.target) && !remotePerson.contains(event.target)) personMenu.hidden = true;
+});
+personVolumeInput.addEventListener('input', () => {
+  personVolume = Number(personVolumeInput.value);
+  applyIncomingVolume();
+  saveFriendSettings();
+});
+personMuteButton.addEventListener('click', () => {
+  personMuted = !personMuted;
+  applyIncomingVolume();
+  saveFriendSettings();
+});
+videoVolumeInput.addEventListener('input', () => {
+  videoVolume = Number(videoVolumeInput.value);
+  applyIncomingVolume();
+  saveFriendSettings();
+});
+videoVolumeInput.value = String(videoVolume);
+applyIncomingVolume();
 
 function scheduleHide() {
   clearTimeout(hideTimer);
@@ -103,6 +271,7 @@ toolbar.addEventListener('pointerleave', scheduleHide);
 document.addEventListener('keydown', (event) => {
   if (!call.hidden && event.key === 'Tab') revealControls();
   if (event.key === 'Escape' && !picker.hidden) closePicker();
+  if (event.key === 'Escape') personMenu.hidden = true;
 });
 
 async function hashRoom(name) {
@@ -128,9 +297,13 @@ joinForm.addEventListener('submit', async (event) => {
       video: false
     });
     micStream = capturedMic;
+    displayName = displayNameInput.value.trim().slice(0, 32);
+    profile.displayName = displayName;
+    saveProfile();
     roomHash = nextHash;
     sessionVersion += 1;
     refreshButtons();
+    updateRoster();
     join.hidden = true;
     call.hidden = false;
     status('Connexion au serveur…');
@@ -165,6 +338,10 @@ function connectSignaling() {
         return;
       }
       polite = !response.peerPresent;
+      call.style.setProperty('--local-accent', polite ? '#ffb7d8' : '#91c5ff');
+      call.style.setProperty('--remote-accent', polite ? '#91c5ff' : '#ffb7d8');
+      remotePresent = Boolean(response.peerPresent);
+      updateRoster();
       if (response.peerPresent) {
         status('Connexion avec votre ami…');
         createPeer();
@@ -183,7 +360,10 @@ function connectSignaling() {
     status('Connexion au serveur perdue. Reconnexion…');
   });
   current.on('peer-joined', () => {
-    if (socket === current) status('Votre ami arrive. Connexion WebRTC…');
+    if (socket !== current) return;
+    remotePresent = true;
+    updateRoster();
+    status('Votre ami arrive. Connexion WebRTC…');
   });
   current.on('peer-left', () => {
     if (socket !== current) return;
@@ -213,7 +393,10 @@ function sendMediaMap() {
     camera: cameraStream?.id || 'inactive-camera',
     screen: screenStream?.id || 'inactive-screen',
     cameraEnabled: Boolean(cameraStream),
-    screenEnabled: Boolean(screenStream)
+    screenEnabled: Boolean(screenStream),
+    micEnabled: Boolean(micStream.getAudioTracks()[0]?.enabled),
+    displayName,
+    profileId: profile.id
   });
 }
 
@@ -234,6 +417,7 @@ function createPeer() {
   };
   connection.onconnectionstatechange = () => {
     if (peer !== connection) return;
+    updateRoster();
     if (connection.connectionState === 'connected') status('Connectés · Profitez du moment ♡');
     if (connection.connectionState === 'disconnected') status('Connexion instable…');
     if (connection.connectionState === 'failed') status('Connexion P2P impossible. Un relais TURN peut être nécessaire.');
@@ -266,9 +450,12 @@ async function handleSignal(message) {
   if (message.type === 'media-map') {
     const previous = remoteMap;
     remoteMap = message.data;
+    remotePresent = true;
+    selectRemoteSettings(remoteMap);
     if (previous?.camera !== remoteMap.camera) remoteStreams.delete(previous.camera);
     if (previous?.screen !== remoteMap.screen) remoteStreams.delete(previous.screen);
     updateVideos();
+    updateRoster();
     return;
   }
   if (message.type === 'ice') {
@@ -318,21 +505,87 @@ function updateVideos() {
   const mic = remoteMap?.mic ? remoteStreams.get(remoteMap.mic) : null;
   const hasScreen = Boolean(screen?.getVideoTracks().length);
   const hasCamera = Boolean(camera?.getVideoTracks().length);
-  const main = cameraIsMain && hasCamera ? camera : hasScreen ? screen : hasCamera ? camera : null;
-  const small = hasScreen && hasCamera ? (main === screen ? camera : screen) : null;
+  const remoteMain = cameraIsMain && hasCamera ? camera : hasScreen ? screen : hasCamera ? camera : null;
+  const remoteOther = hasScreen && hasCamera ? (remoteMain === screen ? camera : screen) : null;
+  const localScreen = screenStream?.getVideoTracks().length ? screenStream : null;
+  const localCamera = cameraStream?.getVideoTracks().length ? cameraStream : null;
+  const localMain = localCameraIsMain && localCamera ? localCamera : localScreen || localCamera;
+  const localOther = localScreen && localCamera ? (localMain === localScreen ? localCamera : localScreen) : null;
+  const split = viewMode === 'split';
+  const main = viewMode === 'remote' ? remoteMain : viewMode === 'local' ? localMain : null;
+  const small = viewMode === 'remote' ? remoteOther : viewMode === 'local' ? remoteMain : null;
+  const localSmall = viewMode === 'local' ? localOther : null;
+  const remoteMuted = remoteMap?.micEnabled === false;
+  stage.dataset.view = viewMode;
+  emptyStage.dataset.owner = viewMode === 'local' || !remotePresent ? 'local' : 'remote';
 
-  if (mainVideo.srcObject !== main) mainVideo.srcObject = main;
-  if (pipVideo.srcObject !== small) pipVideo.srcObject = small;
-  if (remoteMic.srcObject !== mic) remoteMic.srcObject = mic;
-  mainVideo.hidden = !main;
-  pip.hidden = !small;
-  emptyStage.hidden = Boolean(main);
-  emptyStage.textContent = remoteMap ? 'Votre ami ne partage pas de vidéo.' : 'En attente de l’autre personne…';
-  pipLabel.textContent = small === screen ? 'Écran' : 'Webcam';
-  if (main) mainVideo.play().catch(() => {});
-  if (small) pipVideo.play().catch(() => {});
-  if (mic) remoteMic.play().catch(() => {});
+  showMedia(mainVideo, main);
+  showMedia(pipVideo, small);
+  showMedia(localPipVideo, localSmall);
+  showMedia(splitRemoteVideo, split ? remoteMain : null);
+  showMedia(splitLocalVideo, split ? localMain : null);
+  showMedia(remoteMic, mic);
+  showMedia(remoteSystem, screen?.getAudioTracks().length ? screen : null);
+  applyIncomingVolume();
+
+  mainVideo.hidden = split || !main;
+  splitView.hidden = !split;
+  pip.hidden = split || !small;
+  localPip.hidden = split || !localSmall;
+  emptyStage.hidden = split || Boolean(main);
+  emptyStageText.textContent = viewMode === 'local'
+    ? 'Activez votre webcam ou partagez votre écran. Cliquez ici pour revenir aux deux vues.'
+    : remoteMap ? 'Votre ami ne partage pas de vidéo. Cliquez ici pour revenir aux deux vues.'
+      : 'En attente de l’autre personne… Cliquez ici pour afficher les deux vues.';
+  splitRemoteEmpty.hidden = Boolean(remoteMain);
+  splitLocalEmpty.hidden = Boolean(localMain);
+  pipLabel.textContent = viewMode === 'local' ? 'Votre ami'
+    : small === screen ? 'Écran' : 'Webcam';
+  pip.setAttribute('aria-label', viewMode === 'local'
+    ? 'Afficher la vidéo de votre ami en grand' : 'Inverser les vidéos de votre ami');
+  localPipLabel.textContent = localSmall === localScreen ? 'Votre écran' : 'Votre webcam';
+  localPip.setAttribute('aria-label', localSmall === localScreen
+    ? 'Afficher votre écran en grand' : 'Afficher votre webcam en grand');
+  mainMute.hidden = !(remoteMuted && viewMode === 'remote' && remoteMain);
+  splitMute.hidden = !(remoteMuted && split && remoteMain);
+  pipMute.hidden = !(remoteMuted && viewMode === 'local' && small);
+  if (!pip.hidden) fitPip(pip);
+  if (!localPip.hidden) fitPip(localPip);
 }
+
+function showMedia(element, stream) {
+  if (element.srcObject !== stream) {
+    // Libère l'aperçu masqué sans arrêter la piste encore envoyée à l'autre personne.
+    element.pause();
+    element.srcObject = stream;
+  }
+  if (stream && element.paused) element.play().catch(() => {});
+}
+
+function showSplit() {
+  if (viewMode === 'split') return;
+  viewMode = 'split';
+  updateVideos();
+}
+
+stage.addEventListener('click', (event) => {
+  if (viewMode === 'split' || event.target.closest('#split-view, #pip, #local-pip')) return;
+  showSplit();
+});
+mainVideo.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    showSplit();
+  }
+});
+splitRemote.addEventListener('click', () => {
+  viewMode = 'remote';
+  updateVideos();
+});
+splitLocal.addEventListener('click', () => {
+  viewMode = 'local';
+  updateVideos();
+});
 
 function closePeer() {
   if (peer) {
@@ -347,9 +600,19 @@ function closePeer() {
   cameraSender = null;
   screenSenders = [];
   remoteMap = null;
+  remotePresent = false;
   remoteStreams.clear();
   pendingIce = [];
   cameraIsMain = false;
+  localCameraIsMain = false;
+  viewMode = 'remote';
+  personVolume = 100;
+  personMuted = false;
+  personVolumeInput.value = '100';
+  videoVolume = profile.defaultVideoVolume;
+  videoVolumeInput.value = String(videoVolume);
+  activeRemoteKey = null;
+  applyIncomingVolume();
   updateVideos();
 }
 
@@ -358,6 +621,7 @@ muteButton.addEventListener('click', () => {
   if (!mic) return;
   mic.enabled = !mic.enabled;
   refreshButtons();
+  sendMediaMap();
 });
 
 cameraButton.addEventListener('click', async () => {
@@ -382,6 +646,7 @@ cameraButton.addEventListener('click', async () => {
     if (peer) cameraSender = peer.addTrack(captured.getVideoTracks()[0], captured);
     sendMediaMap();
     refreshButtons();
+    updateVideos();
     status('Webcam activée.');
   } catch (error) {
     status('Webcam : ' + errorText(error));
@@ -398,9 +663,11 @@ function stopCamera() {
   if (peer && cameraSender) peer.removeTrack(cameraSender);
   cameraSender = null;
   cameraStream = null;
+  localCameraIsMain = false;
   sendMediaMap();
   captured.getTracks().forEach((track) => track.stop());
   refreshButtons();
+  updateVideos();
   status('Webcam désactivée.');
 }
 
@@ -510,6 +777,8 @@ startShareButton.addEventListener('click', async () => {
     if (!video) throw new Error('La source sélectionnée ne contient pas de vidéo.');
     video.contentHint = 'motion';
     screenSettings = { height, fps };
+    profile.quality = { ...screenSettings };
+    saveProfile();
     screenStream = captured;
     video.addEventListener('ended', () => {
       if (screenStream === captured) stopScreen('Le partage a été arrêté par le système.');
@@ -525,6 +794,7 @@ startShareButton.addEventListener('click', async () => {
     selectedSourceId = null;
     pickerStatus.textContent = '';
     refreshButtons();
+    updateVideos();
     status('Partage actif.');
     revealControls();
   } catch (error) {
@@ -557,10 +827,12 @@ function stopScreen(message = 'Partage arrêté.') {
   if (peer) for (const sender of screenSenders) peer.removeTrack(sender);
   screenSenders = [];
   screenStream = null;
+  localCameraIsMain = false;
   audioWarning = '';
   sendMediaMap();
   captured.getTracks().forEach((track) => track.stop());
   refreshButtons();
+  updateVideos();
   status(message);
 }
 
@@ -572,41 +844,109 @@ window.desktop.onFullscreenChange((enabled) => {
   setButton(fullscreenButton, enabled, 'Quitter le plein écran', 'Passer en plein écran');
 });
 
-let drag = null;
-pip.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0) return;
-  const box = pip.getBoundingClientRect();
-  drag = { id: event.pointerId, offsetX: event.clientX - box.left,
-    offsetY: event.clientY - box.top, startX: event.clientX, startY: event.clientY, moved: false };
-  pip.setPointerCapture(event.pointerId);
+function activatePip() {
+  if (viewMode === 'local') viewMode = 'remote';
+  else cameraIsMain = !cameraIsMain;
+  updateVideos();
+}
+
+function pipMaxWidth() {
+  return Math.min(stage.clientWidth / 2, stage.clientHeight / 2 * 16 / 9) / 1.04;
+}
+
+function fitPip(element) {
+  if (element.hidden) return;
+  const width = Math.min(element.offsetWidth, pipMaxWidth());
+  if (width < element.offsetWidth) element.style.width = width + 'px';
+  const left = Math.max(0, Math.min(element.offsetLeft, stage.clientWidth - width));
+  const top = Math.max(0, Math.min(element.offsetTop, stage.clientHeight - width * 9 / 16));
+  element.style.right = 'auto';
+  element.style.bottom = 'auto';
+  element.style.left = left + 'px';
+  element.style.top = top + 'px';
+}
+
+window.addEventListener('resize', () => {
+  fitPip(pip);
+  fitPip(localPip);
 });
-pip.addEventListener('pointermove', (event) => {
-  if (!drag || drag.id !== event.pointerId) return;
-  if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5 && !drag.moved) return;
-  drag.moved = true;
-  const bounds = stage.getBoundingClientRect();
-  const left = Math.max(0, Math.min(bounds.width - pip.offsetWidth, event.clientX - bounds.left - drag.offsetX));
-  const top = Math.max(0, Math.min(bounds.height - pip.offsetHeight, event.clientY - bounds.top - drag.offsetY));
-  pip.style.right = 'auto';
-  pip.style.left = left + 'px';
-  pip.style.top = top + 'px';
-});
-pip.addEventListener('pointerup', (event) => {
-  if (!drag || drag.id !== event.pointerId) return;
-  if (!drag.moved) {
-    cameraIsMain = !cameraIsMain;
-    updateVideos();
-  }
-  drag = null;
-  pip.releasePointerCapture(event.pointerId);
-});
-pip.addEventListener('pointercancel', () => { drag = null; });
-pip.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' || event.key === ' ') {
+
+function setupPip(element, handle, activate) {
+  let drag = null;
+  let resizing = null;
+  element.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    const box = element.getBoundingClientRect();
+    drag = { id: event.pointerId, offsetX: event.clientX - box.left,
+      offsetY: event.clientY - box.top, startX: event.clientX, startY: event.clientY, moved: false };
+    element.setPointerCapture(event.pointerId);
+  });
+  element.addEventListener('pointermove', (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5 && !drag.moved) return;
+    drag.moved = true;
+    const bounds = stage.getBoundingClientRect();
+    const left = Math.max(0, Math.min(bounds.width - element.offsetWidth, event.clientX - bounds.left - drag.offsetX));
+    const top = Math.max(0, Math.min(bounds.height - element.offsetHeight, event.clientY - bounds.top - drag.offsetY));
+    element.style.right = 'auto';
+    element.style.bottom = 'auto';
+    element.style.left = left + 'px';
+    element.style.top = top + 'px';
+  });
+  element.addEventListener('pointerup', (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+    if (!drag.moved) activate();
+    drag = null;
+    if (element.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
+  });
+  element.addEventListener('pointercancel', () => { drag = null; });
+  element.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      activate();
+    }
+  });
+
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
     event.preventDefault();
-    cameraIsMain = !cameraIsMain;
-    updateVideos();
-  }
+    const left = element.offsetLeft;
+    const top = element.offsetTop;
+    const width = element.offsetWidth;
+    element.classList.add('is-resizing');
+    element.style.right = 'auto';
+    element.style.bottom = 'auto';
+    element.style.left = left + 'px';
+    element.style.top = top + 'px';
+    element.style.width = width + 'px';
+    resizing = { id: event.pointerId, startX: event.clientX, width, left, top };
+    handle.setPointerCapture(event.pointerId);
+  });
+  handle.addEventListener('pointermove', (event) => {
+    if (!resizing || resizing.id !== event.pointerId) return;
+    event.stopPropagation();
+    const max = pipMaxWidth();
+    const width = Math.max(Math.min(160, max), Math.min(max, resizing.width + event.clientX - resizing.startX));
+    element.style.width = width + 'px';
+    element.style.left = Math.max(0, Math.min(resizing.left, stage.clientWidth - width)) + 'px';
+    element.style.top = Math.max(0, Math.min(resizing.top, stage.clientHeight - width * 9 / 16)) + 'px';
+  });
+  const finishResize = (event) => {
+    if (!resizing || resizing.id !== event.pointerId) return;
+    event.stopPropagation();
+    resizing = null;
+    element.classList.remove('is-resizing');
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+  };
+  handle.addEventListener('pointerup', finishResize);
+  handle.addEventListener('pointercancel', finishResize);
+}
+
+setupPip(pip, pipResize, activatePip);
+setupPip(localPip, localPipResize, () => {
+  localCameraIsMain = !localCameraIsMain;
+  updateVideos();
 });
 
 function leave(message = '') {

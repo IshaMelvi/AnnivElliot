@@ -121,13 +121,15 @@ async function main() {
   for (let i = 0; i < 2; i++) {
     const window = new BrowserWindow({
       show: false, width: 1200, height: 750,
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
+      webPreferences: { partition: 'test-user-' + port + '-' + i,
+        contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
     });
     windows.push(window);
     await window.loadFile(path.join(fixture, 'index.html'));
   }
-  for (const window of windows) {
+  for (const [index, window] of windows.entries()) {
     await window.webContents.executeJavaScript(`
+      document.querySelector('#display-name').value = '${index === 0 ? 'Alice' : 'Bob'}';
       document.querySelector('#room').value = 'salon-integration-secret';
       document.querySelector('#join-form').requestSubmit();
     `);
@@ -144,11 +146,122 @@ async function main() {
   }
   record('micro seulement et connexion', true);
 
+  const differentProfiles = await Promise.all(windows.map((window) =>
+    window.webContents.executeJavaScript("JSON.parse(localStorage.getItem('annivelliot.profile.v1')).id")));
+  if (differentProfiles[0] === differentProfiles[1]) throw new Error('Les profils locaux doivent être distincts');
+  const logoColors = await windows[1].webContents.executeJavaScript(`
+    [getComputedStyle(document.querySelector('#split-local .empty-logo')).color,
+      getComputedStyle(document.querySelector('#split-remote .empty-logo')).color]
+  `);
+  if (logoColors[0] === logoColors[1]) throw new Error('Les vues vides des deux personnes ont la même couleur');
+  record('profils distincts et logos colorés', true);
+
+  await waitFor(windows[1], "document.querySelector('#remote-name').textContent === 'Alice'");
+  const roster = await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#self-name').textContent === 'Alice' &&
+    document.querySelector('#remote-name').textContent === 'Bob' &&
+    !document.querySelector('#remote-person').hidden
+  `);
+  if (!roster) throw new Error('Les personnes du salon ne sont pas affichées avec leur prénom');
+  await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#remote-person').dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+  `);
+  const menuOpened = await windows[1].webContents.executeJavaScript(
+    "!document.querySelector('#person-menu').hidden && document.querySelector('#person-menu-name').textContent === 'Alice'");
+  if (!menuOpened) throw new Error('Le clic droit n’ouvre pas le réglage de la personne');
+  await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#person-volume').value = '40';
+    document.querySelector('#person-volume').dispatchEvent(new Event('input', { bubbles: true }));
+  `);
+  const personVolumeWorks = await windows[1].webContents.executeJavaScript(
+    "Math.abs(document.querySelector('#remote-mic').volume - 0.4) < 0.001");
+  if (!personVolumeWorks) throw new Error('Le volume du micro distant ne suit pas le curseur de la personne');
+  await windows[1].webContents.executeJavaScript("document.querySelector('#person-mute').click()");
+  const personMuted = await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#remote-mic').volume === 0 &&
+    !document.querySelector('#remote-muted-mark').hidden
+  `);
+  if (!personMuted) throw new Error('Rendre muet ne coupe pas la personne');
+  await windows[1].webContents.executeJavaScript("document.querySelector('#person-mute').click()");
+  await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#video-volume').value = '25';
+    document.querySelector('#video-volume').dispatchEvent(new Event('input', { bubbles: true }));
+  `);
+  record('personnes du salon et réglages audio', true);
+
+  await windows[1].webContents.executeJavaScript("document.querySelector('#empty-stage').click(); document.querySelector('#split-local').click()");
+  const emptyLocal = await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#stage').dataset.view === 'local' &&
+    !document.querySelector('#empty-stage').hidden
+  `);
+  if (!emptyLocal) throw new Error('La vue locale vide ne s’affiche pas');
+  await windows[1].webContents.executeJavaScript("document.querySelector('#empty-stage').click(); document.querySelector('#split-remote').click()");
+  const recoveredView = await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#stage').dataset.view === 'remote' &&
+    document.querySelector('#split-view').hidden
+  `);
+  if (!recoveredView) throw new Error('Impossible de revenir au partage depuis la vue locale vide');
+  record('retour au split depuis une vue sans vidéo locale', true);
+
   await Promise.all(windows.map((window) =>
     window.webContents.executeJavaScript("document.querySelector('#camera').click()")));
   await Promise.all(windows.map((window) =>
     waitFor(window, "Boolean(document.querySelector('#main-video').srcObject?.getVideoTracks().length)")));
   record('webcams activées simultanément', true);
+
+  await windows[1].webContents.executeJavaScript("document.querySelector('#main-video').click()");
+  const splitReady = await windows[1].webContents.executeJavaScript(`
+    !document.querySelector('#split-view').hidden &&
+    Boolean(document.querySelector('#split-remote-video').srcObject?.getVideoTracks().length) &&
+    Boolean(document.querySelector('#split-local-video').srcObject?.getVideoTracks().length)
+  `);
+  if (!splitReady) throw new Error('Les deux webcams ne sont pas visibles côte à côte');
+  const localStreamId = await windows[1].webContents.executeJavaScript(
+    "document.querySelector('#split-local-video').srcObject.id");
+  await windows[1].webContents.executeJavaScript("document.querySelector('#split-local').click()");
+  const localMain = await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#main-video').srcObject?.id === '${localStreamId}' &&
+    !document.querySelector('#pip').hidden
+  `);
+  if (!localMain) throw new Error('Le flux local ne passe pas en vue principale');
+  await windows[1].webContents.executeJavaScript("document.querySelector('#main-video').click(); document.querySelector('#split-remote').click()");
+  for (let i = 0; i < 3; i++) {
+    const cycle = await windows[1].webContents.executeJavaScript(`
+      (() => {
+        document.querySelector('#main-video').click();
+        const opened = document.querySelector('#stage').dataset.view === 'split';
+        document.querySelector('#split-remote').click();
+        return opened && document.querySelector('#stage').dataset.view === 'remote';
+      })()
+    `);
+    if (!cycle) throw new Error('La vue se bloque après plusieurs changements');
+  }
+  record('vue côte à côte et sélection du flux principal', true);
+
+  await windows[0].webContents.executeJavaScript("document.querySelector('#mute').click()");
+  await waitFor(windows[1], "!document.querySelector('#main-mute').hidden");
+  const mutedStyle = await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#mute').classList.contains('is-off') &&
+    !document.querySelector('#mute').classList.contains('is-active') &&
+    document.querySelector('#camera').classList.contains('is-active') &&
+    document.querySelector('#mute').getAttribute('aria-pressed') === 'false'
+  `);
+  if (!mutedStyle) throw new Error('Le bouton micro désactivé ne suit pas la logique webcam');
+  await windows[1].webContents.executeJavaScript("document.querySelector('#main-video').click()");
+  const splitMuteVisible = await windows[1].webContents.executeJavaScript(
+    "!document.querySelector('#split-mute').hidden");
+  if (!splitMuteVisible) throw new Error('Le micro coupé n’est pas indiqué dans la vue côte à côte');
+  await windows[1].webContents.executeJavaScript("document.querySelector('#split-local').click()");
+  const pipMuteVisible = await windows[1].webContents.executeJavaScript(
+    "!document.querySelector('#pip-mute').hidden");
+  if (!pipMuteVisible) throw new Error('Le micro coupé n’est pas indiqué dans le PiP distant');
+  await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#pip').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  `);
+  await windows[0].webContents.executeJavaScript("document.querySelector('#mute').click()");
+  await waitFor(windows[1], "document.querySelector('#main-mute').hidden");
+  record('état du micro transmis et boutons cohérents', true);
 
   await windows[0].webContents.executeJavaScript("document.querySelector('#share').click()");
   await waitFor(windows[0], "!document.querySelector('#picker').hidden");
@@ -160,7 +273,78 @@ async function main() {
     document.querySelector('#start-share').click();
   `);
   await waitFor(windows[1], "!document.querySelector('#pip').hidden");
+  const screenAudio = await windows[1].webContents.executeJavaScript(
+    "Boolean(document.querySelector('#remote-system').srcObject?.getAudioTracks().length)");
+  if (!screenAudio) throw new Error('L’audio système distant a disparu lors du changement de vue');
+  const mixedVolume = await windows[1].webContents.executeJavaScript(`
+    Math.abs(document.querySelector('#remote-system').volume - 0.1) < 0.001 &&
+    Math.abs(document.querySelector('#remote-mic').volume - 0.4) < 0.001
+  `);
+  if (!mixedVolume) throw new Error('Le curseur vidéo ne doit modifier que l’audio du partage');
   record('écran reçu avec webcam en PiP', true);
+
+  await windows[0].webContents.executeJavaScript(
+    "document.querySelector('#main-video').click(); document.querySelector('#split-local').click()");
+  const ownPip = await windows[0].webContents.executeJavaScript(`
+    !document.querySelector('#local-pip').hidden &&
+    !document.querySelector('#pip').hidden &&
+    Boolean(document.querySelector('#local-pip-video').srcObject?.getVideoTracks().length) &&
+    document.querySelector('#local-pip-video').srcObject.id !== document.querySelector('#main-video').srcObject.id
+  `);
+  if (!ownPip) throw new Error('La webcam locale doit rester en PiP sur le partage personnel');
+  const ownCameraId = await windows[0].webContents.executeJavaScript(
+    "document.querySelector('#local-pip-video').srcObject.id");
+  await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#local-pip').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  `);
+  const ownSwapped = await windows[0].webContents.executeJavaScript(
+    "document.querySelector('#main-video').srcObject.id === '" + ownCameraId + "'");
+  if (!ownSwapped) throw new Error('Le clic sur le PiP local n’agrandit pas la webcam');
+  await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#local-pip').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  `);
+  record('webcam locale en PiP avec le partage personnel', true);
+
+  const ownScreenId = await windows[0].webContents.executeJavaScript(
+    "document.querySelector('#main-video').srcObject.id");
+  await windows[0].webContents.executeJavaScript(
+    "document.querySelector('#main-video').click(); document.querySelector('#split-remote').click()");
+  const detachedPreview = await windows[0].webContents.executeJavaScript(`
+    (() => {
+      const localIds = new Set(['${ownScreenId}', '${ownCameraId}']);
+      const videos = ['#main-video', '#pip-video', '#local-pip-video',
+        '#split-remote-video', '#split-local-video'];
+      return videos.every((selector) => !localIds.has(document.querySelector(selector).srcObject?.id)) &&
+        document.querySelector('#local-pip').hidden &&
+        document.querySelector('#share').getAttribute('aria-pressed') === 'true';
+    })()
+  `);
+  const friendStillReceives = await windows[1].webContents.executeJavaScript(
+    "document.querySelector('#main-video').srcObject?.id === '" + ownScreenId + "'");
+  if (!detachedPreview || !friendStillReceives) {
+    throw new Error('L’aperçu local doit être détaché sans interrompre le partage envoyé');
+  }
+  record('aperçus locaux arrêtés quand la vue distante est principale', true);
+
+  const resized = await windows[1].webContents.executeJavaScript(`
+    (() => {
+      const pip = document.querySelector('#pip');
+      const handle = document.querySelector('#pip-resize');
+      const stage = document.querySelector('#stage');
+      const original = pip.offsetWidth;
+      handle.setPointerCapture = () => {};
+      handle.hasPointerCapture = () => false;
+      const event = (type, x) => new PointerEvent(type, { bubbles: true, pointerId: 77, button: 0, clientX: x, clientY: 300 });
+      handle.dispatchEvent(event('pointerdown', 300));
+      handle.dispatchEvent(event('pointermove', 1300));
+      handle.dispatchEvent(event('pointerup', 1300));
+      return pip.offsetWidth > original && pip.offsetWidth <= stage.clientWidth / 2 &&
+        pip.offsetHeight <= stage.clientHeight / 2 &&
+        pip.classList.contains('is-resizing') === false;
+    })()
+  `);
+  if (!resized) throw new Error('Le PiP ne se redimensionne pas dans la limite d’un quadrant');
+  record('redimensionnement du PiP plafonné à un quadrant', true);
 
   await windows[0].webContents.executeJavaScript("document.querySelector('#share').click()");
   await waitFor(windows[1], "document.querySelector('#pip').hidden");
@@ -174,6 +358,45 @@ async function main() {
   await windows[0].webContents.executeJavaScript("document.querySelector('#camera').click()");
   await waitFor(windows[1], "Boolean(document.querySelector('#main-video').srcObject?.getVideoTracks().length)");
   record('webcam arrêtée puis réactivée', true);
+
+  await windows[1].webContents.executeJavaScript("document.querySelector('#person-mute').click()");
+  await windows[0].webContents.executeJavaScript("document.querySelector('#leave').click()");
+  await waitFor(windows[1], "document.querySelector('#remote-person').hidden");
+  record('personne retirée de la liste à la déconnexion', true);
+
+  await windows[1].webContents.executeJavaScript("document.querySelector('#leave').click()");
+  for (const window of windows) await window.loadFile(path.join(fixture, 'index.html'));
+  const restored = await Promise.all(windows.map((window, index) =>
+    window.webContents.executeJavaScript(`
+      document.querySelector('#display-name').value === '${index === 0 ? 'Alice' : 'Bob'}' &&
+      JSON.parse(localStorage.getItem('annivelliot.profile.v1')).id === '${differentProfiles[index]}'
+    `)));
+  if (!restored.every(Boolean)) throw new Error('Le profil local ne revient pas après rechargement');
+  const qualityRestored = await windows[0].webContents.executeJavaScript(`
+    document.querySelector('input[name="resolution"][value="1080"]').checked &&
+    document.querySelector('input[name="fps"][value="60"]').checked
+  `);
+  if (!qualityRestored) throw new Error('La qualité du partage n’est pas mémorisée');
+  for (const window of windows) {
+    await window.webContents.executeJavaScript(`
+      document.querySelector('#room').value = 'salon-integration-secret';
+      document.querySelector('#join-form').requestSubmit();
+    `);
+  }
+  await Promise.all(windows.map((window) =>
+    waitFor(window, "document.querySelector('#call-status').textContent.includes('Connectés')")));
+  const friendRestored = await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#person-volume').value === '40' &&
+    document.querySelector('#video-volume').value === '25' &&
+    document.querySelector('#person-mute').getAttribute('aria-pressed') === 'true' &&
+    document.querySelector('#remote-mic').volume === 0
+  `);
+  if (!friendRestored) throw new Error('Les volumes de cet ami ne reviennent pas à la reconnexion');
+  await windows[1].webContents.executeJavaScript("document.querySelector('#person-mute').click()");
+  const unmutedVolume = await windows[1].webContents.executeJavaScript(
+    "Math.abs(document.querySelector('#remote-mic').volume - 0.4) < 0.001");
+  if (!unmutedVolume) throw new Error('Le volume enregistré ne revient pas après réactivation du son');
+  record('prénom, qualité et volumes conservés à la reconnexion', true);
 }
 
 app.whenReady().then(async () => {
