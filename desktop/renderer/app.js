@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client';
 
 // À remplacer par l'URL HTTPS du service Render avant de créer l'installateur.
-const SIGNAL_URL = 'http://localhost:3000';
+const SIGNAL_URL = 'https://annivelliot-signaling.onrender.com';
 const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 const join = document.querySelector('#join');
