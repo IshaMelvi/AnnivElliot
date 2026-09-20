@@ -1,6 +1,6 @@
 {
-  "name": "annivelliot-desktop",
-  "version": "1.0.0",
+  "name": "cherublink-desktop",
+  "version": "1.1.0",
   "private": true,
   "description": "Partage d'écran, de webcam et d'audio pour deux amis",
   "main": "main.js",
@@ -21,10 +21,10 @@
   },
   "build": {
     "appId": "ch.annivelliot.stream",
-    "productName": "AnnivElliot",
+    "productName": "CherubLink",
     "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "renderer/index.html", "renderer/style.css", "renderer/bundle.js"],
-    "win": { "target": "nsis", "artifactName": "AnnivElliot-Setup.${ext}" },
+    "files": ["main.js", "preload.js", "assets/**", "renderer/index.html", "renderer/style.css", "renderer/bundle.js"],
+    "win": { "target": "nsis", "artifactName": "CherubLink-Setup.${ext}", "icon": "assets/cherublink-logo.png" },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
   }
 }

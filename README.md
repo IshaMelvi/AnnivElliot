@@ -1,6 +1,6 @@
-# AnnivElliot
+# CherubLink
 
-Un cadeau d'anniversaire composé d'une page GitHub Pages, d'un serveur de signalisation Socket.IO et d'une application Electron pour deux personnes.
+Un cadeau d'anniversaire composé d'une page GitHub Pages, d'un serveur de signalisation Socket.IO et de CherubLink, une application Electron pour deux personnes.
 
 ## Prérequis Windows
 
@@ -21,6 +21,7 @@ AnnivElliot/
 ├─ docs/                  # site GitHub Pages
 │  ├─ index.html
 │  ├─ style.css
+│  ├─ assets/             # logo CherubLink et portrait d'anniversaire
 │  └─ app.js
 ├─ signaling/             # serveur Render
 │  ├─ package.json
@@ -29,6 +30,7 @@ AnnivElliot/
    ├─ package.json
    ├─ main.js
    ├─ preload.js
+   ├─ assets/            # logo utilisé par l'interface et l'icône Windows
    └─ renderer/
       ├─ index.html
       ├─ style.css
@@ -51,7 +53,9 @@ Sur Render, crée un *Blueprint* depuis le `render.yaml` à la racine du dépôt
 
 ## 2. Site anniversaire
 
-Dans GitHub, active **Settings → Pages → Deploy from a branch → main → /docs**. Le bouton télécharge `AnnivElliot-Setup.exe` depuis la dernière GitHub Release du dépôt `IshaMelvi/AnnivElliot`.
+Dans GitHub, active **Settings → Pages → Deploy from a branch → main → /docs**. Le bouton télécharge `CherubLink-Setup.exe` depuis la dernière GitHub Release du dépôt `IshaMelvi/AnnivElliot`.
+
+Le portrait et le logo fournis sont conservés dans `docs/assets/`. Le portrait apparaît au centre de la page, entouré d'étoiles animées en CSS. L'animation s'arrête si le visiteur demande une réduction des mouvements. Le logo de l'application est également présent dans `desktop/assets/` pour fonctionner hors ligne et générer l'icône Windows.
 
 ## 3. Application Electron
 
@@ -75,12 +79,14 @@ Sur Windows, pour produire l'installateur :
 npm.cmd run build:win
 ```
 
-Le fichier `desktop/dist/AnnivElliot-Setup.exe` est à téléverser dans une GitHub Release publiée. Le lien du site fonctionnera alors. Pour tester avec deux personnes, lancez chacun l'application et choisissez le même nom de salon. Seul le micro est demandé à l'entrée ; la webcam et l'écran s'activent ensuite par leurs boutons. Un nom long et difficile à deviner sert de secret partagé.
+Le fichier `desktop/dist/CherubLink-Setup.exe` est à téléverser dans une GitHub Release publiée. Le lien du site fonctionnera alors. Pour tester avec deux personnes, lancez chacun l'application et choisissez le même nom de salon. Seul le micro est demandé à l'entrée ; la webcam et l'écran s'activent ensuite par leurs boutons. Un nom long et difficile à deviner sert de secret partagé.
+
+Le nom affiché devient CherubLink. L'identifiant d'installation `ch.annivelliot.stream`, le dossier de profil `%APPDATA%/annivelliot-desktop` et la clé des préférences existante sont conservés pour retrouver les profils et les volumes enregistrés. Le dépôt GitHub et l'adresse du serveur Render gardent leurs noms actuels.
 
 ## Fonctionnement et limites
 
 - Chaque personne envoie son micro dès l'entrée du salon. La webcam démarre désactivée et sa capture est arrêtée quand on la coupe. L'écran est partagé seulement après un choix explicite. Les deux personnes peuvent ensuite émettre et regarder.
-- Les commandes du salon apparaissent au mouvement de la souris puis s'effacent après quelques secondes. Le bouton écran ouvre les onglets **Fenêtres** et **Écrans entiers**, suivis des choix 720p/1080p et 30/60 fps. Le bouton plein écran affiche l'application sans les bordures de la fenêtre.
+- Les commandes du salon apparaissent au mouvement de la souris puis s'effacent après trois secondes. Le bouton écran ouvre les onglets **Fenêtres** et **Écrans entiers**, suivis des choix 720p/1080p et 30/60 fps. Le bouton plein écran affiche uniquement la zone vidéo : la colonne des participants disparaît, tandis que les PiP et les commandes flottantes restent disponibles. La vidéo principale est affichée entièrement, sans recadrage. Échap, le bouton de plein écran ou la sortie du salon permettent de revenir à la vue normale.
 - Cliquez sur la grande vidéo ou sur sa zone vide pour afficher côte à côte celle de votre ami et la vôtre. Cliquez ensuite sur une moitié pour l'agrandir ; vous pouvez refaire ce cycle autant de fois que vous voulez, même sans vidéo locale. Votre moitié montre l'écran partagé s'il est actif, sinon la webcam. Quand votre écran et votre webcam sont actifs, votre webcam apparaît aussi en PiP dans la vue de votre partage personnel, à côté du PiP de votre ami. Les PiP se déplacent à la souris et se redimensionnent par leur coin inférieur droit, jusqu'à un quart de la fenêtre. Les vues sans vidéo montrent le logo avec une couleur propre à chaque participant. Quand l'autre personne coupe son micro, une indication discrète apparaît sur sa vidéo.
 - La bande de gauche montre les deux personnes du salon. Chacun peut renseigner un prénom facultatif avant d'entrer. Un clic droit sur l'autre personne ouvre son volume entrant et un bouton pour la rendre muette. Le curseur à gauche du bouton plein écran règle seulement l'audio du partage vidéo reçu ; le réglage de la personne agit sur son micro et sur cet audio.
 - Le prénom, la résolution et la fréquence de partage, ainsi que les volumes et l'état muet associés à chaque ami, sont conservés localement entre les lancements. Un identifiant aléatoire de profil sert à retrouver les réglages du même ami ; le serveur ne les stocke pas. Si les données locales de l'application sont effacées, un nouvel identifiant est créé et l'association avec les anciens réglages est perdue.

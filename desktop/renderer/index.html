@@ -3,33 +3,48 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https: wss: http://localhost:3000 ws://localhost:3000; media-src 'self' blob:; object-src 'none'">
-  <title>AnnivElliot — Salon privé</title>
+  <title>CherubLink — Salon privé</title>
+  <link rel="icon" type="image/png" href="../assets/cherublink-logo.png">
   <link rel="stylesheet" href="style.css">
   <script src="bundle.js" defer></script>
 </head>
 <body>
   <main id="join" class="join">
-    <div class="join-card">
-      <span class="badge">✦ ANNIVELLIOT</span>
-      <h1>Regardons ça ensemble.</h1>
-      <p>Entre dans un salon avec ton micro. Tu pourras activer la webcam et partager ton écran quand tu le souhaites.</p>
-      <form id="join-form">
-        <label for="display-name">Votre prénom <span class="optional">(facultatif)</span></label>
-        <input id="display-name" name="display-name" type="text" maxlength="32" autocomplete="nickname" placeholder="Votre prénom">
-        <label for="room">Nom du salon partagé</label>
-        <input id="room" name="room" type="text" minlength="6" maxlength="100" autocomplete="off" placeholder="Notre soirée secrète..." required>
-        <button class="primary" type="submit">Entrer dans le salon →</button>
-      </form>
-      <p class="hint">Utilise un nom de salon long et difficile à deviner. Ton prénom et tes réglages sont mémorisés sur cet ordinateur.</p>
-      <p id="join-status" class="message" role="status"></p>
+    <div class="join-shell">
+      <section class="join-intro" aria-labelledby="join-title">
+        <div class="brand"><img class="brand-mark" src="../assets/cherublink-logo.png" width="48" height="48" alt=""><span>CherubLink</span></div>
+        <span class="badge intro-eyebrow">VOTRE SALON, À DEUX</span>
+        <h1 id="join-title">La même soirée.<br><span class="accent-text">Même à distance.</span></h1>
+        <p class="join-description">Un film, un jeu, une conversation qui se prolonge. Retrouvez-vous dans votre espace, où que vous soyez.</p>
+        <ul class="join-features">
+          <li><span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="3"/><path d="M12 17v4m-4 0h8"/></svg></span><div><strong>Regardez ensemble</strong><span>Votre écran et son audio, en direct.</span></div></li>
+          <li><span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="3"/><path d="m15 10 6-3v10l-6-3"/></svg></span><div><strong>À votre rythme</strong><span>La webcam s'active quand vous le décidez.</span></div></li>
+        </ul>
+      </section>
+      <section class="join-card glass" aria-labelledby="room-title">
+        <span class="badge">ON SE RETROUVE ?</span>
+        <h2 id="room-title">Installe-toi.</h2>
+        <p>Choisissez le même nom de salon pour vous retrouver.</p>
+        <form id="join-form">
+          <label for="display-name">Ton prénom <span class="optional">(facultatif)</span></label>
+          <input id="display-name" name="display-name" type="text" maxlength="32" autocomplete="nickname" placeholder="Comment t'appelles-tu ?">
+          <label for="room">Nom du salon partagé</label>
+          <input id="room" name="room" type="text" minlength="6" maxlength="100" autocomplete="off" placeholder="Notre soirée secrète..." aria-describedby="room-hint" required>
+          <button class="primary" type="submit">Entrer dans le salon <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="join-privacy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg>Seul ton micro est actif à l'entrée.</p>
+        <p id="room-hint" class="hint">Utilise un nom de salon long et difficile à deviner. Ton prénom et tes réglages sont mémorisés sur cet ordinateur.</p>
+        <p id="join-status" class="message" role="status"></p>
+      </section>
     </div>
   </main>
 
   <section id="picker" class="picker" hidden role="dialog" aria-modal="true" aria-labelledby="picker-title">
-    <div class="picker-card">
+    <div class="picker-card glass">
       <div class="picker-heading">
-        <div><h2 id="picker-title">Partager mon écran</h2><p>Choisis une fenêtre ou un écran entier.</p></div>
+        <div><span class="badge">À REGARDER ENSEMBLE</span><h2 id="picker-title">Partager mon écran</h2><p>Choisis une fenêtre ou un écran entier.</p></div>
         <button id="picker-close" class="picker-close" type="button" aria-label="Fermer">×</button>
       </div>
       <div class="tabs" role="tablist" aria-label="Type de source">
@@ -53,15 +68,15 @@
   </section>
 
   <main id="call" class="call" hidden>
-    <aside class="sidebar" aria-label="Personnes dans le salon">
-      <div class="sidebar-heading"><span class="badge">✦ ANNIVELLIOT</span><h2>Dans le salon</h2></div>
+    <aside class="sidebar glass" aria-label="Personnes dans le salon">
+      <div class="sidebar-heading"><div class="brand"><img class="brand-mark" src="../assets/cherublink-logo.png" width="48" height="48" alt=""><span>CherubLink</span></div><h2>Dans le salon</h2></div>
       <div class="participants">
         <div class="participant"><span id="self-avatar" class="participant-avatar">V</span><span class="participant-text"><strong id="self-name">Vous</strong><small>Vous</small></span></div>
         <button id="remote-person" class="participant participant-button" type="button" aria-haspopup="dialog" title="Clic droit pour régler le son" hidden>
           <span id="remote-avatar" class="participant-avatar">A</span><span class="participant-text"><strong id="remote-name">Votre ami</strong><small id="remote-state">Connexion…</small></span><span id="remote-muted-mark" class="muted-mark" hidden>Muet</span>
         </button>
       </div>
-      <div id="person-menu" class="person-menu" role="dialog" aria-label="Son de votre ami" hidden>
+      <div id="person-menu" class="person-menu glass" role="dialog" aria-label="Son de votre ami" hidden>
         <strong id="person-menu-name">Votre ami</strong>
         <label for="person-volume">Volume entrant <output id="person-volume-value" for="person-volume">100 %</output></label>
         <input id="person-volume" type="range" min="0" max="100" value="100" aria-label="Volume de cette personne">
@@ -69,67 +84,69 @@
       </div>
       <p class="sidebar-hint">Clic droit sur un prénom pour régler son son.</p>
     </aside>
-    <div id="stage" class="stage">
-      <video id="main-video" autoplay playsinline muted role="button" tabindex="0" aria-label="Afficher les deux vidéos côte à côte"></video>
-      <audio id="remote-mic" autoplay></audio>
-      <audio id="remote-system" autoplay></audio>
-      <div id="main-mute" class="remote-mute-badge" hidden aria-label="Micro de votre ami coupé">Micro coupé</div>
-      <button id="empty-stage" class="empty-stage" type="button" aria-label="Afficher les deux vues">
-        <span class="empty-content"><span class="empty-logo" aria-hidden="true">✦</span><strong class="empty-brand">ANNIVELLIOT</strong><span id="empty-stage-text">En attente de l'autre personne…</span></span>
-      </button>
-      <div id="split-view" class="split-view" hidden>
-        <button id="split-remote" class="split-pane" type="button" aria-label="Afficher la vidéo de votre ami en grand">
-          <video id="split-remote-video" autoplay playsinline muted></video>
-          <span class="split-label">Votre ami</span>
-          <span id="split-remote-empty" class="split-empty" hidden><span class="empty-content"><span class="empty-logo" aria-hidden="true">✦</span><strong class="empty-brand">ANNIVELLIOT</strong><span>Pas de vidéo</span></span></span>
-          <span id="split-mute" class="remote-mute-badge" hidden>Micro coupé</span>
+    <section id="video-area" class="video-area" aria-label="Vidéos du salon">
+      <div id="stage" class="stage">
+        <video id="main-video" class="video-surface" autoplay playsinline muted role="button" tabindex="0" aria-label="Afficher les deux vidéos côte à côte"></video>
+        <audio id="remote-mic" autoplay></audio>
+        <audio id="remote-system" autoplay></audio>
+        <div id="main-mute" class="remote-mute-badge" hidden aria-label="Micro de votre ami coupé">Micro coupé</div>
+        <button id="empty-stage" class="empty-stage" type="button" aria-label="Afficher les deux vues">
+          <span class="empty-content"><span class="empty-logo" aria-hidden="true"><img src="../assets/cherublink-logo.png" width="128" height="128" alt=""></span><strong class="empty-brand">CHERUBLINK</strong><span id="empty-stage-text">En attente de l'autre personne…</span></span>
         </button>
-        <button id="split-local" class="split-pane" type="button" aria-label="Afficher votre vidéo en grand">
-          <video id="split-local-video" autoplay playsinline muted></video>
-          <span class="split-label">Vous</span>
-          <span id="split-local-empty" class="split-empty" hidden><span class="empty-content"><span class="empty-logo" aria-hidden="true">✦</span><strong class="empty-brand">ANNIVELLIOT</strong><span>Activez votre webcam ou partagez votre écran</span></span></span>
-        </button>
-      </div>
-      <div id="pip" class="pip" role="button" tabindex="0" aria-label="Inverser les vidéos" hidden>
-        <video id="pip-video" autoplay playsinline muted></video>
-        <span id="pip-label" class="pip-label">Webcam</span>
-        <span id="pip-mute" class="remote-mute-badge" hidden>Micro coupé</span>
-        <span id="pip-resize" class="resize-handle" aria-label="Redimensionner la petite vidéo" title="Redimensionner la petite vidéo">⤢</span>
-      </div>
-      <div id="local-pip" class="pip local-pip" role="button" tabindex="0" aria-label="Afficher votre webcam en grand" hidden>
-        <video id="local-pip-video" autoplay playsinline muted></video>
-        <span id="local-pip-label" class="pip-label">Votre webcam</span>
-        <span id="local-pip-resize" class="resize-handle" aria-label="Redimensionner votre petite vidéo" title="Redimensionner votre petite vidéo">⤢</span>
-      </div>
-    </div>
-    <div class="overlay overlay-top">
-      <div class="room-info"><span class="pulse"></span><div><strong>Salon privé</strong><span id="call-status" role="status">Connexion…</span></div></div>
-    </div>
-    <div id="toolbar" class="overlay toolbar">
-      <div class="actions">
-        <button id="mute" class="control media-toggle is-active" type="button" aria-label="Couper mon micro" title="Couper mon micro" aria-pressed="true">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/><path class="off-mark" d="M3 21 21 3"/></svg>
-        </button>
-        <button id="camera" class="control media-toggle is-off" type="button" aria-label="Activer ma webcam" title="Activer ma webcam" aria-pressed="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/><path class="off-mark" d="M3 21 21 3"/></svg>
-        </button>
-        <button id="share" class="control" type="button" aria-label="Partager mon écran" title="Partager mon écran" aria-pressed="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="14" rx="2"/><path d="M12 17.5V21m-3 0h6M10 13.5l6-6m-4 0h4v4"/></svg>
-        </button>
-        <span class="divider" aria-hidden="true"></span>
-        <div class="video-volume" title="Volume de la vidéo de votre ami">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4zm13-1a6 6 0 0 1 0 8m2-11a10 10 0 0 1 0 14"/></svg>
-          <input id="video-volume" type="range" min="0" max="100" value="100" aria-label="Volume de la vidéo de votre ami">
-          <output id="video-volume-value" for="video-volume">100 %</output>
+        <div id="split-view" class="split-view" hidden>
+          <button id="split-remote" class="split-pane" type="button" aria-label="Afficher la vidéo de votre ami en grand">
+            <video id="split-remote-video" class="video-surface" autoplay playsinline muted></video>
+            <span class="split-label">Votre ami</span>
+            <span id="split-remote-empty" class="split-empty" hidden><span class="empty-content"><span class="empty-logo" aria-hidden="true"><img src="../assets/cherublink-logo.png" width="128" height="128" alt=""></span><strong class="empty-brand">CHERUBLINK</strong><span>Pas de vidéo</span></span></span>
+            <span id="split-mute" class="remote-mute-badge" hidden>Micro coupé</span>
+          </button>
+          <button id="split-local" class="split-pane" type="button" aria-label="Afficher votre vidéo en grand">
+            <video id="split-local-video" class="video-surface" autoplay playsinline muted></video>
+            <span class="split-label">Vous</span>
+            <span id="split-local-empty" class="split-empty" hidden><span class="empty-content"><span class="empty-logo" aria-hidden="true"><img src="../assets/cherublink-logo.png" width="128" height="128" alt=""></span><strong class="empty-brand">CHERUBLINK</strong><span>Activez votre webcam ou partagez votre écran</span></span></span>
+          </button>
         </div>
-        <button id="fullscreen" class="control" type="button" aria-label="Passer en plein écran" title="Passer en plein écran" aria-pressed="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H3v6m0-6 7 7m5-7h6v6m0-6-7 7M3 15v6h6m-6 0 7-7m11 1v6h-6m6 0-7-7"/></svg>
-        </button>
-        <button id="leave" class="control danger" type="button" aria-label="Quitter le salon" title="Quitter le salon">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10v16H4zM10 12h11m-4-4 4 4-4 4"/></svg>
-        </button>
+        <div id="pip" class="pip" role="button" tabindex="0" aria-label="Inverser les vidéos" hidden>
+          <video id="pip-video" class="video-surface" autoplay playsinline muted></video>
+          <span id="pip-label" class="pip-label">Webcam</span>
+          <span id="pip-mute" class="remote-mute-badge" hidden>Micro coupé</span>
+          <span id="pip-resize" class="resize-handle" aria-label="Redimensionner la petite vidéo" title="Redimensionner la petite vidéo">⤢</span>
+        </div>
+        <div id="local-pip" class="pip local-pip" role="button" tabindex="0" aria-label="Afficher votre webcam en grand" hidden>
+          <video id="local-pip-video" class="video-surface" autoplay playsinline muted></video>
+          <span id="local-pip-label" class="pip-label">Votre webcam</span>
+          <span id="local-pip-resize" class="resize-handle" aria-label="Redimensionner votre petite vidéo" title="Redimensionner votre petite vidéo">⤢</span>
+        </div>
       </div>
-    </div>
+      <div class="overlay overlay-top">
+        <div class="room-info glass"><span class="pulse"></span><div><strong>Salon privé</strong><span id="call-status" role="status">Connexion…</span></div></div>
+      </div>
+      <div id="toolbar" class="overlay toolbar">
+        <div class="actions glass" role="group" aria-label="Contrôles du salon">
+          <button id="mute" class="control media-toggle is-active" type="button" aria-label="Couper mon micro" title="Couper mon micro" aria-pressed="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/><path class="off-mark" d="M3 21 21 3"/></svg>
+          </button>
+          <button id="camera" class="control media-toggle is-off" type="button" aria-label="Activer ma webcam" title="Activer ma webcam" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/><path class="off-mark" d="M3 21 21 3"/></svg>
+          </button>
+          <button id="share" class="control" type="button" aria-label="Partager mon écran" title="Partager mon écran" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3.5" width="19" height="14" rx="2"/><path d="M12 17.5V21m-3 0h6M10 13.5l6-6m-4 0h4v4"/></svg>
+          </button>
+          <span class="divider" aria-hidden="true"></span>
+          <div class="video-volume" title="Volume de la vidéo de votre ami">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4zm13-1a6 6 0 0 1 0 8m2-11a10 10 0 0 1 0 14"/></svg>
+            <input id="video-volume" type="range" min="0" max="100" value="100" aria-label="Volume de la vidéo de votre ami">
+            <output id="video-volume-value" for="video-volume">100 %</output>
+          </div>
+          <button id="fullscreen" class="control" type="button" aria-label="Afficher la vidéo en plein écran" title="Afficher la vidéo en plein écran" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H3v6m0-6 7 7m5-7h6v6m0-6-7 7M3 15v6h6m-6 0 7-7m11 1v6h-6m6 0-7-7"/></svg>
+          </button>
+          <button id="leave" class="control danger" type="button" aria-label="Quitter le salon" title="Quitter le salon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10v16H4zM10 12h11m-4-4 4 4-4 4"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
   </main>
 </body>
 </html>

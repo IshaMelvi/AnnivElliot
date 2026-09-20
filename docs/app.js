@@ -1,6 +1,6 @@
 const canvas = document.querySelector('#confetti');
 const context = canvas.getContext('2d');
-const colors = ['#ffd86b', '#ff80b9', '#a984ff', '#79e5dc', '#ffffff'];
+const colors = ['#a5b4fc', '#818cf8', '#c4b5fd', '#e0e7ff'];
 let pieces = [];
 let started = 0;
 
@@ -13,10 +13,10 @@ function resize() {
 function animate(time) {
   if (!started) started = time;
   context.clearRect(0, 0, innerWidth, innerHeight);
-  if (time - started < 1500 && pieces.length < 260) {
-    for (let i = 0; i < 8; i++) {
+  if (time - started < 1200 && pieces.length < 150) {
+    for (let i = 0; i < 5; i++) {
       pieces.push({ x: Math.random() * innerWidth, y: -20, vx: (Math.random() - .5) * 6,
-        vy: 2 + Math.random() * 3, size: 4 + Math.random() * 7, angle: Math.random() * 7,
+        vy: 2 + Math.random() * 3, size: 3 + Math.random() * 5, angle: Math.random() * 7,
         spin: (Math.random() - .5) * .2, color: colors[Math.floor(Math.random() * colors.length)] });
     }
   }
@@ -32,7 +32,7 @@ function animate(time) {
     context.restore();
   }
   pieces = pieces.filter((piece) => piece.y < innerHeight + 30);
-  if (pieces.length || time - started < 1500) requestAnimationFrame(animate);
+  if (pieces.length || time - started < 1200) requestAnimationFrame(animate);
 }
 
 window.addEventListener('resize', resize);

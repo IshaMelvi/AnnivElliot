@@ -1,5 +1,14 @@
 const path = require('node:path');
+const fs = require('node:fs');
 const { app, BrowserWindow, desktopCapturer, ipcMain, session } = require('electron');
+
+// Keep the existing Chromium profile when the visible app name changes.
+const profileDirectory = path.join(app.getPath('appData'), 'annivelliot-desktop');
+fs.mkdirSync(profileDirectory, { recursive: true });
+app.setPath('userData', profileDirectory);
+app.setPath('sessionData', profileDirectory);
+app.setName('CherubLink');
+if (process.platform === 'win32') app.setAppUserModelId('ch.annivelliot.stream');
 
 let window;
 let sources = new Map();
@@ -15,7 +24,9 @@ app.whenReady().then(() => {
     height: 800,
     minWidth: 760,
     minHeight: 520,
-    backgroundColor: '#11131f',
+    title: 'CherubLink',
+    icon: path.join(__dirname, 'assets', 'cherublink-logo.png'),
+    backgroundColor: '#0b1020',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -28,7 +39,7 @@ app.whenReady().then(() => {
   window.webContents.on('will-navigate', (event) => event.preventDefault());
 
   const allowed = (contents, permission) =>
-    contents === window?.webContents && ['media', 'display-capture'].includes(permission);
+    contents === window?.webContents && ['media', 'display-capture', 'fullscreen'].includes(permission);
 
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => {
     callback(allowed(contents, permission));
@@ -71,15 +82,6 @@ app.whenReady().then(() => {
     selectedSource = sources.get(id);
     sources.clear();
   });
-
-  ipcMain.handle('toggle-fullscreen', (event) => {
-    if (!ownWindow(event)) throw new Error('Accès refusé.');
-    window.setFullScreen(!window.isFullScreen());
-    return window.isFullScreen();
-  });
-
-  window.on('enter-full-screen', () => window?.webContents.send('fullscreen-state', true));
-  window.on('leave-full-screen', () => window?.webContents.send('fullscreen-state', false));
 
   window.on('closed', () => { window = null; });
   window.loadFile(path.join(__dirname, 'renderer', 'index.html'));

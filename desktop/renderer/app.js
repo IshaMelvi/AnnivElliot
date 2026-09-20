@@ -16,6 +16,7 @@ const pickerStatus = $('#picker-status');
 const sourcesList = $('#sources');
 const startShareButton = $('#start-share');
 const call = $('#call');
+const videoArea = $('#video-area');
 const callStatus = $('#call-status');
 const mainVideo = $('#main-video');
 const pipVideo = $('#pip-video');
@@ -250,10 +251,10 @@ applyIncomingVolume();
 function scheduleHide() {
   clearTimeout(hideTimer);
   hideTimer = setTimeout(() => {
-    if (!toolbar.matches(':hover') && !toolbar.contains(document.activeElement) && picker.hidden) {
+    if (!toolbar.querySelector(':focus-visible') && picker.hidden) {
       call.classList.remove('controls-visible');
     }
-  }, 2500);
+  }, 3000);
 }
 
 function revealControls() {
@@ -266,8 +267,9 @@ call.addEventListener('pointermove', (event) => {
   if (event.pointerType === 'mouse') revealControls();
 });
 call.addEventListener('pointerdown', revealControls);
-toolbar.addEventListener('pointerenter', () => clearTimeout(hideTimer));
 toolbar.addEventListener('pointerleave', scheduleHide);
+toolbar.addEventListener('focusin', revealControls);
+toolbar.addEventListener('focusout', scheduleHide);
 document.addEventListener('keydown', (event) => {
   if (!call.hidden && event.key === 'Tab') revealControls();
   if (event.key === 'Escape' && !picker.hidden) closePicker();
@@ -338,8 +340,8 @@ function connectSignaling() {
         return;
       }
       polite = !response.peerPresent;
-      call.style.setProperty('--local-accent', polite ? '#ffb7d8' : '#91c5ff');
-      call.style.setProperty('--remote-accent', polite ? '#91c5ff' : '#ffb7d8');
+      call.style.setProperty('--local-accent', polite ? '#a5b4fc' : '#c4b5fd');
+      call.style.setProperty('--remote-accent', polite ? '#c4b5fd' : '#a5b4fc');
       remotePresent = Boolean(response.peerPresent);
       updateRoster();
       if (response.peerPresent) {
@@ -837,11 +839,18 @@ function stopScreen(message = 'Partage arrêté.') {
 }
 
 fullscreenButton.addEventListener('click', async () => {
-  try { await window.desktop.toggleFullscreen(); }
+  try {
+    if (document.fullscreenElement === videoArea) await document.exitFullscreen();
+    else await videoArea.requestFullscreen();
+  }
   catch (error) { status('Plein écran : ' + errorText(error)); }
 });
-window.desktop.onFullscreenChange((enabled) => {
-  setButton(fullscreenButton, enabled, 'Quitter le plein écran', 'Passer en plein écran');
+document.addEventListener('fullscreenchange', () => {
+  const enabled = document.fullscreenElement === videoArea;
+  setButton(fullscreenButton, enabled, 'Quitter le plein écran vidéo', 'Afficher la vidéo en plein écran');
+  fitPip(pip);
+  fitPip(localPip);
+  revealControls();
 });
 
 function activatePip() {
@@ -950,6 +959,9 @@ setupPip(localPip, localPipResize, () => {
 });
 
 function leave(message = '') {
+  if (document.fullscreenElement === videoArea) {
+    document.exitFullscreen().catch((error) => console.warn('Sortie du plein écran :', error));
+  }
   sessionVersion += 1;
   const previousSocket = socket;
   socket = null;

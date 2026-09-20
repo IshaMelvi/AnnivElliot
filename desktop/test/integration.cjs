@@ -60,9 +60,7 @@ function prepareFixture(port) {
         { id: 'window:test', kind: 'window', name: 'Fenêtre de test', thumbnail: '' },
         { id: 'screen:test', kind: 'screen', name: 'Écran de test', thumbnail: '' }
       ],
-      selectSource: async () => {},
-      toggleFullscreen: async () => false,
-      onFullscreenChange: () => () => {}
+      selectSource: async () => {}
     };
     const keepAlive = [];
     function audioTrack() {
@@ -126,7 +124,9 @@ async function main() {
     });
     windows.push(window);
     await window.loadFile(path.join(fixture, 'index.html'));
+    await waitFor(window, "Array.from(document.images).every((image) => image.complete && image.naturalWidth > 0)");
   }
+  record('logos CherubLink chargés dans les deux interfaces', true);
   for (const [index, window] of windows.entries()) {
     await window.webContents.executeJavaScript(`
       document.querySelector('#display-name').value = '${index === 0 ? 'Alice' : 'Bob'}';
@@ -145,6 +145,28 @@ async function main() {
     if (!privateByDefault) throw new Error('La webcam doit être coupée et le micro actif au départ');
   }
   record('micro seulement et connexion', true);
+
+  await windows[0].webContents.executeJavaScript(`
+    document.activeElement?.blur();
+    document.querySelector('#call').dispatchEvent(
+      new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }));
+  `);
+  await delay(2600);
+  const hudStillVisible = await windows[0].webContents.executeJavaScript(
+    "document.querySelector('#call').classList.contains('controls-visible')");
+  if (!hudStillVisible) throw new Error('Le HUD disparaît avant trois secondes');
+  await delay(850);
+  const hudHidden = await windows[0].webContents.executeJavaScript(
+    "!document.querySelector('#call').classList.contains('controls-visible')");
+  if (!hudHidden) throw new Error('Le HUD ne se masque pas après trois secondes');
+  await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#call').dispatchEvent(
+      new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }));
+  `);
+  const hudRevealed = await windows[0].webContents.executeJavaScript(
+    "document.querySelector('#call').classList.contains('controls-visible')");
+  if (!hudRevealed) throw new Error('Le mouvement de souris ne réaffiche pas le HUD');
+  record('HUD masqué après trois secondes et réaffiché au mouvement', true);
 
   const differentProfiles = await Promise.all(windows.map((window) =>
     window.webContents.executeJavaScript("JSON.parse(localStorage.getItem('annivelliot.profile.v1')).id")));
@@ -209,6 +231,30 @@ async function main() {
   await Promise.all(windows.map((window) =>
     waitFor(window, "Boolean(document.querySelector('#main-video').srcObject?.getVideoTracks().length)")));
   record('webcams activées simultanément', true);
+
+  await windows[1].webContents.executeJavaScript("document.querySelector('#fullscreen').click()", true);
+  await waitFor(windows[1], "document.fullscreenElement?.id === 'video-area'");
+  await waitFor(windows[1], "document.querySelector('#fullscreen').getAttribute('aria-pressed') === 'true'");
+  const videoFullscreen = await windows[1].webContents.executeJavaScript(`
+    (() => {
+      const area = document.fullscreenElement;
+      const bounds = area.getBoundingClientRect();
+      return area.contains(document.querySelector('#main-video')) &&
+        area.contains(document.querySelector('#pip')) &&
+        area.contains(document.querySelector('#toolbar')) &&
+        !area.contains(document.querySelector('.sidebar')) &&
+        Math.abs(bounds.width - innerWidth) < 2 &&
+        Math.abs(bounds.height - innerHeight) < 2;
+    })()
+  `);
+  if (!videoFullscreen) throw new Error('Le plein écran doit cibler les vidéos et leurs commandes, sans la colonne des participants');
+  await windows[1].webContents.executeJavaScript("document.exitFullscreen()");
+  await waitFor(windows[1], "document.querySelector('#fullscreen').getAttribute('aria-pressed') === 'false'");
+  await windows[1].webContents.executeJavaScript("document.querySelector('#fullscreen').click()", true);
+  await waitFor(windows[1], "document.fullscreenElement?.id === 'video-area'");
+  await windows[1].webContents.executeJavaScript("document.querySelector('#fullscreen').click()", true);
+  await waitFor(windows[1], "!document.fullscreenElement");
+  record('plein écran vidéo avec PiP, HUD et retour à la vue normale', true);
 
   await windows[1].webContents.executeJavaScript("document.querySelector('#main-video').click()");
   const splitReady = await windows[1].webContents.executeJavaScript(`
@@ -360,7 +406,11 @@ async function main() {
   record('webcam arrêtée puis réactivée', true);
 
   await windows[1].webContents.executeJavaScript("document.querySelector('#person-mute').click()");
+  await windows[0].webContents.executeJavaScript("document.querySelector('#fullscreen').click()", true);
+  await waitFor(windows[0], "document.fullscreenElement?.id === 'video-area'");
   await windows[0].webContents.executeJavaScript("document.querySelector('#leave').click()");
+  await waitFor(windows[0], "!document.fullscreenElement && !document.querySelector('#join').hidden");
+  record('sortie du plein écran en quittant le salon', true);
   await waitFor(windows[1], "document.querySelector('#remote-person').hidden");
   record('personne retirée de la liste à la déconnexion', true);
 
