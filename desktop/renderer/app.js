@@ -1,4 +1,8 @@
 import { io } from 'socket.io-client';
+import { normalizeAudioSettings } from './voice-gate.mjs';
+import { microphoneError } from './audio.js';
+import { createAudioSettings } from './audio-settings.js';
+import { startDiagnostics } from './diagnostics.js';
 
 const SIGNAL_URL = 'https://annivelliot-signaling.onrender.com';
 const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -77,6 +81,7 @@ function loadProfile() {
       ? stored.id : crypto.randomUUID(),
     displayName: typeof stored.displayName === 'string' ? stored.displayName.slice(0, 32) : '',
     defaultVideoVolume: volumeOr(stored.defaultVideoVolume, 100),
+    audio: normalizeAudioSettings(stored.audio),
     quality: { height: quality.height === 1080 ? 1080 : 720, fps: quality.fps === 60 ? 60 : 30 },
     friends: stored.friends && typeof stored.friends === 'object' && !Array.isArray(stored.friends)
       ? stored.friends : {}
@@ -132,6 +137,18 @@ let activeTab = 'window';
 let selectedSourceId = null;
 let screenSettings = { ...profile.quality };
 let hideTimer = null;
+
+const audioSettings = createAudioSettings({
+  settings: profile.audio, save: saveProfile, outputs: [remoteMic, remoteSystem],
+  onVolume: applyIncomingVolume,
+  onNotice: (text) => { if (call.hidden) joinStatus.textContent = text; else status(text); },
+  onInputEnded: () => { refreshButtons(); sendMediaMap(); }
+});
+startDiagnostics(() => ({ peer,
+  sender: screenSenders.find((sender) => sender.track?.kind === 'video'),
+  remoteTrack: remoteMap?.screenEnabled ? remoteStreams.get(remoteMap.screen)?.getVideoTracks()[0] : null,
+  capture: screenStream?.getVideoTracks()[0]?.getSettings(), target: screenSettings
+}));
 
 function status(message) {
   callStatus.textContent = audioWarning ? message + ' · ' + audioWarning : message;
@@ -203,7 +220,7 @@ function updateRoster() {
 }
 
 function applyIncomingVolume() {
-  const personLevel = personMuted ? 0 : personVolume / 100;
+  const personLevel = personMuted ? 0 : personVolume / 100 * profile.audio.masterVolume / 100;
   remoteMic.volume = personLevel;
   remoteSystem.volume = personLevel * videoVolume / 100;
   personVolumeValue.textContent = personVolume + ' %';
@@ -294,10 +311,7 @@ joinForm.addEventListener('submit', async (event) => {
   joinStatus.textContent = 'Activation du micro…';
   try {
     const nextHash = await hashRoom(name);
-    const capturedMic = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
-      video: false
-    });
+    const capturedMic = await audioSettings.start();
     micStream = capturedMic;
     displayName = displayNameInput.value.trim().slice(0, 32);
     profile.displayName = displayName;
@@ -311,7 +325,8 @@ joinForm.addEventListener('submit', async (event) => {
     status('Connexion au serveur…');
     connectSignaling();
   } catch (error) {
-    joinStatus.textContent = errorText(error);
+    audioSettings.stop();
+    joinStatus.textContent = microphoneError(error);
   } finally {
     busy = false;
   }
@@ -437,11 +452,15 @@ function createPeer() {
     }
   };
 
+  connection.onsignalingstatechange = () => {
+    if (peer === connection && connection.signalingState === 'stable') configureVideoSenders();
+  };
+
   for (const track of micStream.getTracks()) connection.addTrack(track, micStream);
   if (cameraStream) cameraSender = connection.addTrack(cameraStream.getVideoTracks()[0], cameraStream);
   if (screenStream) {
     screenSenders = screenStream.getTracks().map((track) => connection.addTrack(track, screenStream));
-    configureScreenSender(screenSenders[0]);
+    configureVideoSenders();
   }
   sendMediaMap();
   return connection;
@@ -595,6 +614,7 @@ function closePeer() {
     peer.ontrack = null;
     peer.onconnectionstatechange = null;
     peer.onnegotiationneeded = null;
+    peer.onsignalingstatechange = null;
     peer.close();
   }
   peer = null;
@@ -637,7 +657,7 @@ cameraButton.addEventListener('click', async () => {
   const version = sessionVersion;
   try {
     const captured = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+      video: { width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 30, max: 30 } },
       audio: false
     });
     if (version !== sessionVersion) {
@@ -646,6 +666,7 @@ cameraButton.addEventListener('click', async () => {
     }
     cameraStream = captured;
     if (peer) cameraSender = peer.addTrack(captured.getVideoTracks()[0], captured);
+    configureVideoSenders();
     sendMediaMap();
     refreshButtons();
     updateVideos();
@@ -685,8 +706,12 @@ shareButton.addEventListener('click', async () => {
 async function openPicker() {
   busy = true;
   pickerStatus.textContent = '';
+  $('#share-without-audio').hidden = true;
+  const version = sessionVersion;
   try {
+    if (document.fullscreenElement) await document.exitFullscreen();
     allSources = await window.desktop.listSources();
+    if (version !== sessionVersion) return;
     if (!allSources.length) throw new Error('Aucune fenêtre ou écran disponible.');
     activeTab = allSources.some((source) => source.kind === 'window') ? 'window' : 'screen';
     selectedSourceId = null;
@@ -746,6 +771,9 @@ $('#tab-screen').addEventListener('click', () => {
   renderSources();
 });
 $('#picker-close').addEventListener('click', closePicker);
+$('#refresh-sources').addEventListener('click', () => { if (!busy) openPicker(); });
+$('#system-audio').disabled = window.desktop.platform !== 'win32';
+$('#system-audio').checked = window.desktop.platform === 'win32';
 
 function closePicker() {
   if (busy || picker.hidden) return;
@@ -755,21 +783,25 @@ function closePicker() {
   scheduleHide();
 }
 
-startShareButton.addEventListener('click', async () => {
+async function startScreenShare() {
   if (busy || !selectedSourceId) return;
   busy = true;
   startShareButton.disabled = true;
   pickerStatus.textContent = 'Activation du partage…';
   const version = sessionVersion;
+  const captureAudio = window.desktop.platform === 'win32' && $('#system-audio').checked;
+  $('#share-without-audio').hidden = true;
   let captured;
   try {
     const height = Number($('input[name="resolution"]:checked').value);
     const fps = Number($('input[name="fps"]:checked').value);
     const width = height === 1080 ? 1920 : 1280;
-    await window.desktop.selectSource(selectedSourceId);
+    await window.desktop.selectSource(selectedSourceId, captureAudio);
+    if (version !== sessionVersion) return;
     captured = await navigator.mediaDevices.getDisplayMedia({
-      video: { width: { ideal: width }, height: { ideal: height }, frameRate: { ideal: fps } },
-      audio: window.desktop.platform === 'win32'
+      video: { width: { ideal: width, max: width }, height: { ideal: height, max: height }, frameRate: { ideal: fps, max: fps } },
+      audio: captureAudio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+        channelCount: 2, restrictOwnAudio: true } : false
     });
     if (version !== sessionVersion) {
       captured.getTracks().forEach((track) => track.stop());
@@ -785,11 +817,11 @@ startShareButton.addEventListener('click', async () => {
     video.addEventListener('ended', () => {
       if (screenStream === captured) stopScreen('Le partage a été arrêté par le système.');
     });
-    audioWarning = window.desktop.platform === 'win32' && !captured.getAudioTracks().length
-      ? 'audio système indisponible' : '';
+    audioWarning = captureAudio && !captured.getAudioTracks().length
+      ? 'Le son du partage est indisponible. Arrêtez le partage et réessayez avec une sortie Windows active.' : '';
     if (peer) {
       screenSenders = captured.getTracks().map((track) => peer.addTrack(track, captured));
-      configureScreenSender(screenSenders.find((sender) => sender.track?.kind === 'video'));
+      configureVideoSenders();
     }
     sendMediaMap();
     picker.hidden = true;
@@ -801,22 +833,43 @@ startShareButton.addEventListener('click', async () => {
     revealControls();
   } catch (error) {
     captured?.getTracks().forEach((track) => track.stop());
-    pickerStatus.textContent = errorText(error);
+    if (version !== sessionVersion) return;
+    const audioFailed = captureAudio && (error?.name === 'NotReadableError' || /audio source/i.test(error?.message || ''));
+    pickerStatus.textContent = audioFailed
+      ? 'Windows n’a pas pu capturer le son du partage. Vérifiez qu’une sortie audio est active (casque ou haut-parleurs), puis réessayez. Si besoin, fermez les applications audio ou désactivez leur mode exclusif. Vous pouvez aussi tester le partage sans son.'
+      : errorText(error);
+    $('#share-without-audio').hidden = !audioFailed;
   } finally {
     busy = false;
     startShareButton.disabled = !selectedSourceId;
   }
+}
+startShareButton.addEventListener('click', startScreenShare);
+$('#share-without-audio').addEventListener('click', () => {
+  if (busy) return;
+  $('#system-audio').checked = false;
+  startScreenShare();
 });
 
-async function configureScreenSender(sender) {
-  if (!sender) return;
+const senderUpdates = new WeakMap();
+function configureSender(sender, screen) {
+  if (!sender?.track || senderUpdates.has(sender)) return;
+  const operation = applySenderQuality(sender, screen).finally(() => senderUpdates.delete(sender));
+  senderUpdates.set(sender, operation);
+}
+function configureVideoSenders() {
+  configureSender(screenSenders.find((sender) => sender.track?.kind === 'video'), true);
+  configureSender(cameraSender, false);
+}
+async function applySenderQuality(sender, screen) {
   try {
     const params = sender.getParameters();
-    if (!params.encodings?.length) params.encodings = [{}];
-    params.encodings[0].maxBitrate = BITRATES[screenSettings.height + '-' + screenSettings.fps];
-    params.encodings[0].maxFramerate = screenSettings.fps;
-    params.encodings[0].scaleResolutionDownBy = 1;
-    params.degradationPreference = 'maintain-resolution';
+    // Chromium may expose no encodings until SDP is negotiated; retry at stable signaling.
+    if (!params.encodings?.length) return;
+    params.encodings[0].maxBitrate = screen ? BITRATES[screenSettings.height + '-' + screenSettings.fps] : 1_200_000;
+    params.encodings[0].maxFramerate = screen ? screenSettings.fps : 30;
+    params.encodings[0].priority = screen ? 'high' : 'low';
+    params.degradationPreference = 'maintain-framerate';
     await sender.setParameters(params);
   } catch (error) {
     console.warn('Réglage de qualité indisponible :', error);
@@ -963,6 +1016,8 @@ function leave(message = '') {
     document.exitFullscreen().catch((error) => console.warn('Sortie du plein écran :', error));
   }
   sessionVersion += 1;
+  audioSettings.stop();
+  audioSettings.dialog.close();
   const previousSocket = socket;
   socket = null;
   previousSocket?.disconnect();

@@ -37,6 +37,7 @@
         <p class="join-privacy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg>Seul ton micro est actif à l'entrée.</p>
         <p id="room-hint" class="hint">Utilise un nom de salon long et difficile à deviner. Ton prénom et tes réglages sont mémorisés sur cet ordinateur.</p>
         <p id="join-status" class="message" role="status"></p>
+        <button class="secondary settings-open" type="button">Paramètres audio</button>
       </section>
     </div>
   </main>
@@ -62,7 +63,11 @@
           <label><input type="radio" name="fps" value="60"> 60 fps</label>
         </fieldset>
       </div>
+      <label class="capture-audio"><input id="system-audio" type="checkbox" checked> Partager le son de l’ordinateur</label>
+      <p class="settings-help">30 fps convient aux films. 60 fps demande plus de débit et de puissance. Le son partagé comprend les applications de l’ordinateur.</p>
+      <button id="refresh-sources" class="secondary" type="button">Actualiser les fenêtres</button>
       <p id="picker-status" class="message" role="status"></p>
+      <button id="share-without-audio" class="secondary" type="button" hidden>Réessayer sans le son du partage</button>
       <button id="start-share" class="primary" type="button" disabled>Démarrer le partage</button>
     </div>
   </section>
@@ -82,7 +87,10 @@
         <input id="person-volume" type="range" min="0" max="100" value="100" aria-label="Volume de cette personne">
         <button id="person-mute" type="button" aria-pressed="false">Rendre muet</button>
       </div>
-      <p class="sidebar-hint">Clic droit sur un prénom pour régler son son.</p>
+      <div class="sidebar-footer">
+        <p class="sidebar-hint">Clic droit sur un prénom pour régler son son.</p>
+        <button class="secondary settings-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-1 3-3 1-2 3 2 2-1 3 3 2 3-1 2 3 3-1 1-3 3-1 2-3-2-2 1-3-3-2-3 1-2-3z"/><circle cx="12" cy="11" r="3"/></svg>Paramètres</button>
+      </div>
     </aside>
     <section id="video-area" class="video-area" aria-label="Vidéos du salon">
       <div id="stage" class="stage">
@@ -148,5 +156,42 @@
       </div>
     </section>
   </main>
+
+  <dialog id="settings-dialog" class="settings-dialog glass" aria-labelledby="settings-title">
+    <div class="picker-heading">
+      <div><span class="badge">À VOTRE ÉCOUTE</span><h2 id="settings-title">Paramètres</h2><p>Vos réglages sont enregistrés sur cet ordinateur.</p></div>
+      <button id="settings-close" class="picker-close" type="button" aria-label="Fermer les paramètres">×</button>
+    </div>
+    <div class="settings-grid">
+      <section class="settings-section" aria-labelledby="input-title">
+        <h3 id="input-title">Microphone</h3>
+        <label for="audio-input">Entrée audio</label>
+        <select id="audio-input"><option value="default">Microphone par défaut</option></select>
+        <button id="test-microphone" class="secondary" type="button">Tester la détection</button>
+        <div class="meter-heading"><span>Niveau détecté</span><output id="mic-level-text">Micro inactif</output></div>
+        <meter id="mic-level" min="-80" max="0" value="-80" aria-label="Niveau du microphone en décibels"></meter>
+        <label for="sensitivity-mode">Détection de la voix</label>
+        <select id="sensitivity-mode"><option value="auto">Automatique</option><option value="manual">Seuil manuel</option></select>
+        <label class="range-label" for="mic-threshold">Seuil <output id="mic-threshold-value">−45 dB</output></label>
+        <input id="mic-threshold" type="range" min="-65" max="-10" value="-45" step="1" disabled>
+        <p class="settings-help">En manuel, déplacez le curseur à gauche pour capter une voix plus faible. La jauge devient verte lorsque la voix passe. Le son du film reste indépendant.</p>
+      </section>
+      <section class="settings-section" aria-labelledby="output-title">
+        <h3 id="output-title">Écoute</h3>
+        <label for="audio-output">Sortie audio</label>
+        <select id="audio-output"><option value="default">Sortie par défaut</option></select>
+        <label class="range-label" for="master-volume">Volume général <output id="master-volume-value">100 %</output></label>
+        <input id="master-volume" type="range" min="0" max="100" value="100">
+        <p class="settings-help">Ajuste tout le son reçu dans CherubLink. Les volumes propres à chaque ami et à son partage sont conservés.</p>
+        <p class="settings-help">Si les noms des périphériques sont masqués, lancez le test du micro pour autoriser leur détection. Aucun son de test n’est envoyé à votre ami avant l’entrée dans le salon.</p>
+      </section>
+    </div>
+    <section class="settings-section quality-diagnostics" aria-labelledby="quality-title">
+      <div class="diagnostics-heading"><h3 id="quality-title">Qualité du partage</h3><button id="copy-diagnostics" class="secondary" type="button">Copier le diagnostic</button></div>
+      <dl class="diagnostics-grid"><div><dt>Votre envoi</dt><dd id="stats-send">Aucun partage</dd></div><div><dt>Votre réception</dt><dd id="stats-receive">Aucun partage</dd></div></dl>
+      <p id="stats-advice" class="settings-help">Les mesures s’affichent pendant un partage. Elles permettent de distinguer le débit réseau de la vitesse de traitement vidéo.</p>
+    </section>
+    <p id="settings-status" class="message" role="status"></p>
+  </dialog>
 </body>
 </html>

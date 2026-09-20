@@ -1,6 +1,6 @@
 {
   "name": "cherublink-desktop",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Partage d'écran, de webcam et d'audio pour deux amis",
   "main": "main.js",
@@ -8,6 +8,7 @@
     "build:renderer": "esbuild ./renderer/app.js --bundle --platform=browser --format=iife --outfile=./renderer/bundle.js",
     "prestart": "npm run build:renderer",
     "start": "electron .",
+    "test": "node --test test/unit.test.cjs",
     "test:integration": "npm run build:renderer && electron test/integration.cjs",
     "build:win": "npm run build:renderer && electron-builder --win nsis"
   },
@@ -23,7 +24,7 @@
     "appId": "ch.annivelliot.stream",
     "productName": "CherubLink",
     "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "assets/**", "renderer/index.html", "renderer/style.css", "renderer/bundle.js"],
+    "files": ["main.js", "preload.js", "capture-sources.cjs", "assets/**", "renderer/index.html", "renderer/style.css", "renderer/bundle.js", "renderer/voice-gate-worklet.js", "renderer/voice-gate.mjs"],
     "win": { "target": "nsis", "artifactName": "CherubLink-Setup.${ext}", "icon": "assets/cherublink-logo.png" },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
   }

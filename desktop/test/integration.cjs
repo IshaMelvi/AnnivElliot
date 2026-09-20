@@ -50,6 +50,9 @@ function prepareFixture(port) {
     '<script src="stub.js"></script><script src="bundle-test.js" defer></script>');
   fs.writeFileSync(path.join(fixture, 'index.html'), html);
   fs.copyFileSync(path.join(renderer, 'style.css'), path.join(fixture, 'style.css'));
+  for (const name of ['voice-gate-worklet.js', 'voice-gate.mjs']) {
+    fs.copyFileSync(path.join(renderer, name), path.join(fixture, name));
+  }
   const bundle = fs.readFileSync(path.join(renderer, 'bundle.js'), 'utf8');
   fs.writeFileSync(path.join(fixture, 'bundle-test.js'),
     bundle.replace('https://annivelliot-signaling.onrender.com', 'http://127.0.0.1:' + port));
@@ -60,17 +63,38 @@ function prepareFixture(port) {
         { id: 'window:test', kind: 'window', name: 'Fenêtre de test', thumbnail: '' },
         { id: 'screen:test', kind: 'screen', name: 'Écran de test', thumbnail: '' }
       ],
-      selectSource: async () => {}
+      selectSource: async (id, audio) => { window.lastSelection = { id, audio }; }
     };
     const keepAlive = [];
+    window.testPeers = [];
+    const NativePeer = window.RTCPeerConnection;
+    window.RTCPeerConnection = class extends NativePeer {
+      constructor(config) { super(config); window.testPeers.push(this); }
+    };
+    window.testAudioInputs = [];
+    window.testMicrophoneTracks = [];
+    navigator.mediaDevices.enumerateDevices = async () => [
+      { kind: 'audioinput', deviceId: 'default', label: 'Micro Windows' },
+      { kind: 'audioinput', deviceId: 'usb-mic', label: 'Micro USB' },
+      { kind: 'audioinput', deviceId: 'broken-mic', label: 'Micro indisponible' },
+      { kind: 'audiooutput', deviceId: 'headphones', label: 'Casque' },
+      { kind: 'audiooutput', deviceId: 'broken-output', label: 'Sortie indisponible' }
+    ];
+    HTMLMediaElement.prototype.setSinkId = async function(id) {
+      if (id === 'broken-output' && this.id === 'remote-system') throw new DOMException('Absent', 'NotFoundError');
+      Object.defineProperty(this, 'sinkId', { configurable: true, value: id });
+    };
     function audioTrack() {
       const context = new AudioContext();
       const oscillator = context.createOscillator();
+      const gain = context.createGain();
       const destination = context.createMediaStreamDestination();
-      oscillator.connect(destination);
+      oscillator.connect(gain).connect(destination);
       oscillator.start();
       keepAlive.push(context, oscillator);
-      return destination.stream.getAudioTracks()[0];
+      const track = destination.stream.getAudioTracks()[0];
+      track.testSetLevel = (value) => { gain.gain.value = value; };
+      return track;
     }
     function videoStream(fps) {
       const canvas = document.createElement('canvas');
@@ -86,11 +110,24 @@ function prepareFixture(port) {
       return canvas.captureStream(fps);
     }
     navigator.mediaDevices.getUserMedia = async (constraints) => {
+      if (constraints.audio) {
+        window.testAudioInputs.push(constraints.audio);
+        if (constraints.audio.deviceId?.exact === 'broken-mic') throw new DOMException('Could not start audio source', 'NotReadableError');
+      }
       const stream = constraints.video ? videoStream(30) : new MediaStream();
-      if (constraints.audio) stream.addTrack(audioTrack());
+      if (constraints.audio) {
+        const track = audioTrack();
+        window.testMicrophoneTracks.push(track);
+        stream.addTrack(track);
+      }
       return stream;
     };
     navigator.mediaDevices.getDisplayMedia = async (constraints) => {
+      window.lastDisplayConstraints = constraints;
+      if (window.failNextSystemAudio && constraints.audio) {
+        window.failNextSystemAudio = false;
+        throw new DOMException('Could not start audio source', 'NotReadableError');
+      }
       const stream = videoStream(constraints.video.frameRate.ideal);
       if (constraints.audio) stream.addTrack(audioTrack());
       return stream;
@@ -106,15 +143,18 @@ async function main() {
     env: { ...process.env, PORT: String(port) },
     windowsHide: true
   });
+  let serverError = '';
+  server.stderr.on('data', (chunk) => { serverError += chunk; });
+  server.on('error', (error) => { serverError += error.message; });
   let healthy = false;
-  for (let attempt = 0; attempt < 50; attempt++) {
+  for (let attempt = 0; attempt < 150; attempt++) {
     try {
       const response = await fetch('http://127.0.0.1:' + port + '/health');
       if (response.ok) { healthy = true; break; }
     } catch {}
     await delay(100);
   }
-  if (!healthy) throw new Error('Serveur local indisponible');
+  if (!healthy) throw new Error('Serveur local indisponible : ' + serverError);
 
   for (let i = 0; i < 2; i++) {
     const window = new BrowserWindow({
@@ -145,6 +185,38 @@ async function main() {
     if (!privateByDefault) throw new Error('La webcam doit être coupée et le micro actif au départ');
   }
   record('micro seulement et connexion', true);
+
+  await windows[0].webContents.executeJavaScript("document.querySelector('#call .settings-open').click()");
+  await waitFor(windows[0], "document.querySelector('#audio-input').options.length === 3");
+  const micIdBefore = await windows[1].webContents.executeJavaScript("document.querySelector('#remote-mic').srcObject.id");
+  await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#audio-input').value = 'usb-mic';
+    document.querySelector('#audio-input').dispatchEvent(new Event('change'));
+  `);
+  await waitFor(windows[0], "JSON.parse(localStorage.getItem('annivelliot.profile.v1')).audio.inputDeviceId === 'usb-mic'");
+  const switched = await windows[0].webContents.executeJavaScript("window.testMicrophoneTracks[0].readyState === 'ended' && window.testMicrophoneTracks[1].readyState === 'live'");
+  if (!switched) throw new Error('L’ancien microphone doit être libéré après le changement');
+  if (await windows[1].webContents.executeJavaScript("document.querySelector('#remote-mic').srcObject.id") !== micIdBefore) throw new Error('Le changement de micro a recréé le flux distant');
+  await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#audio-input').value = 'broken-mic';
+    document.querySelector('#audio-input').dispatchEvent(new Event('change'));
+  `);
+  await waitFor(windows[0], "document.querySelector('#settings-status').textContent.includes('Impossible d’ouvrir')");
+  const keptMic = await windows[0].webContents.executeJavaScript("document.querySelector('#audio-input').value === 'usb-mic' && window.testMicrophoneTracks[1].readyState === 'live'");
+  if (!keptMic) throw new Error('Une entrée défectueuse a interrompu le microphone précédent');
+  await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#sensitivity-mode').value = 'manual';
+    document.querySelector('#sensitivity-mode').dispatchEvent(new Event('change'));
+    document.querySelector('#mic-threshold').value = '-38';
+    document.querySelector('#mic-threshold').dispatchEvent(new Event('input'));
+  `);
+  await waitFor(windows[0], "document.querySelector('#mic-level').value > -50 && document.querySelector('#mic-level').classList.contains('voice-active')");
+  await windows[0].webContents.executeJavaScript("window.testMicrophoneTracks[1].testSetLevel(0)");
+  await waitFor(windows[0], "document.querySelector('#mic-level').value < -70 && !document.querySelector('#mic-level').classList.contains('voice-active')");
+  await windows[0].webContents.executeJavaScript("window.testMicrophoneTracks[1].testSetLevel(1)");
+  await waitFor(windows[0], "document.querySelector('#mic-level').classList.contains('voice-active')");
+  await windows[0].webContents.executeJavaScript("document.querySelector('#settings-close').click()");
+  record('changement de micro sans renégociation, erreur réversible et détection réelle AudioWorklet', true);
 
   await windows[0].webContents.executeJavaScript(`
     document.activeElement?.blur();
@@ -312,13 +384,28 @@ async function main() {
   await windows[0].webContents.executeJavaScript("document.querySelector('#share').click()");
   await waitFor(windows[0], "!document.querySelector('#picker').hidden");
   await windows[0].webContents.executeJavaScript(`
+    window.failNextSystemAudio = true;
     document.querySelector('#tab-screen').click();
     document.querySelector('#sources .source').click();
     document.querySelector('input[name="resolution"][value="1080"]').checked = true;
     document.querySelector('input[name="fps"][value="60"]').checked = true;
     document.querySelector('#start-share').click();
   `);
+  await waitFor(windows[0], "!document.querySelector('#share-without-audio').hidden");
+  const retryAvailable = await windows[0].webContents.executeJavaScript("!document.querySelector('#start-share').disabled && document.querySelector('#picker-status').textContent.includes('son du partage')");
+  if (!retryAvailable) throw new Error('Une erreur audio empêche de réessayer la même source');
+  await windows[0].webContents.executeJavaScript("document.querySelector('#start-share').click()");
   await waitFor(windows[1], "!document.querySelector('#pip').hidden");
+  await waitFor(windows[0], `window.testPeers.at(-1).getSenders().some(sender => sender.track?.kind === 'video' && sender.getParameters().encodings?.[0]?.maxBitrate === 12000000 && sender.getParameters().degradationPreference === 'maintain-framerate')`);
+  const captureLimits = await windows[0].webContents.executeJavaScript(`
+    window.lastDisplayConstraints.video.width.max === 1920 &&
+    window.lastDisplayConstraints.video.height.max === 1080 &&
+    window.lastDisplayConstraints.video.frameRate.max === 60 &&
+    window.lastDisplayConstraints.audio.noiseSuppression === false &&
+    window.lastDisplayConstraints.audio.restrictOwnAudio === true
+  `);
+  if (!captureLimits) throw new Error('La capture ne respecte pas les plafonds choisis ou traite le son du film comme de la voix');
+  record('reprise après erreur audio et qualité appliquée au véritable émetteur vidéo', true);
   const screenAudio = await windows[1].webContents.executeJavaScript(
     "Boolean(document.querySelector('#remote-system').srcObject?.getAudioTracks().length)");
   if (!screenAudio) throw new Error('L’audio système distant a disparu lors du changement de vue');
@@ -328,6 +415,34 @@ async function main() {
   `);
   if (!mixedVolume) throw new Error('Le curseur vidéo ne doit modifier que l’audio du partage');
   record('écran reçu avec webcam en PiP', true);
+
+  await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#call .settings-open').click();
+    document.querySelector('#master-volume').value = '50';
+    document.querySelector('#master-volume').dispatchEvent(new Event('input'));
+  `);
+  await waitFor(windows[1], "document.querySelector('#audio-output').options.length === 3");
+  const masterIndependent = await windows[1].webContents.executeJavaScript(`
+    Math.abs(document.querySelector('#remote-mic').volume - 0.2) < .001 &&
+    Math.abs(document.querySelector('#remote-system').volume - 0.05) < .001 &&
+    document.querySelector('#person-volume').value === '40' && document.querySelector('#video-volume').value === '25'
+  `);
+  if (!masterIndependent) throw new Error('Le volume général écrase les réglages individuels');
+  await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#audio-output').value = 'headphones';
+    document.querySelector('#audio-output').dispatchEvent(new Event('change'));
+  `);
+  await waitFor(windows[1], "document.querySelector('#remote-mic').sinkId === 'headphones' && document.querySelector('#remote-system').sinkId === 'headphones'");
+  await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#audio-output').value = 'broken-output';
+    document.querySelector('#audio-output').dispatchEvent(new Event('change'));
+  `);
+  await waitFor(windows[1], "document.querySelector('#settings-status').textContent.includes('indisponible')");
+  const restoredOutput = await windows[1].webContents.executeJavaScript("document.querySelector('#remote-mic').sinkId === 'headphones' && document.querySelector('#remote-system').sinkId === 'headphones' && document.querySelector('#audio-output').value === 'headphones'");
+  if (!restoredOutput) throw new Error('Le routage ne revient pas au casque après un échec partiel');
+  await waitFor(windows[1], "document.querySelector('#stats-receive').textContent.includes('Mbit/s')");
+  await windows[1].webContents.executeJavaScript("document.querySelector('#settings-close').click()");
+  record('sortie commune, retour après erreur, volume général indépendant et mesures WebRTC', true);
 
   await windows[0].webContents.executeJavaScript(
     "document.querySelector('#main-video').click(); document.querySelector('#split-local').click()");
@@ -399,6 +514,23 @@ async function main() {
   if (!micContinues) throw new Error('Le micro a disparu après arrêt du partage');
   record('arrêt du partage et micro conservé', true);
 
+  await windows[0].webContents.executeJavaScript("document.querySelector('#share').click()");
+  await waitFor(windows[0], "!document.querySelector('#picker').hidden");
+  await windows[0].webContents.executeJavaScript(`
+    window.failNextSystemAudio = true;
+    document.querySelector('#sources .source').click();
+    document.querySelector('#start-share').click();
+  `);
+  await waitFor(windows[0], "!document.querySelector('#share-without-audio').hidden");
+  await windows[0].webContents.executeJavaScript("document.querySelector('#share-without-audio').click()");
+  await waitFor(windows[1], "!document.querySelector('#pip').hidden");
+  const videoOnly = await windows[0].webContents.executeJavaScript("window.lastSelection.audio === false && window.lastDisplayConstraints.audio === false");
+  const noSystemAudio = await windows[1].webContents.executeJavaScript("document.querySelector('#remote-system').srcObject === null && !!document.querySelector('#remote-mic').srcObject");
+  if (!videoOnly || !noSystemAudio) throw new Error('Le repli explicite sans son modifie le micro ou demande encore le loopback');
+  await windows[0].webContents.executeJavaScript("document.querySelector('#share').click()");
+  await waitFor(windows[1], "document.querySelector('#pip').hidden");
+  record('repli explicite sans audio système avec microphone conservé', true);
+
   await windows[0].webContents.executeJavaScript("document.querySelector('#camera').click()");
   await waitFor(windows[1], "!document.querySelector('#main-video').srcObject");
   await windows[0].webContents.executeJavaScript("document.querySelector('#camera').click()");
@@ -415,6 +547,9 @@ async function main() {
   record('personne retirée de la liste à la déconnexion', true);
 
   await windows[1].webContents.executeJavaScript("document.querySelector('#leave').click()");
+  for (const window of windows) {
+    if (!await window.webContents.executeJavaScript("window.testMicrophoneTracks.every(track => track.readyState === 'ended')")) throw new Error('Un micro reste capturé après la sortie');
+  }
   for (const window of windows) await window.loadFile(path.join(fixture, 'index.html'));
   const restored = await Promise.all(windows.map((window, index) =>
     window.webContents.executeJavaScript(`
@@ -427,6 +562,11 @@ async function main() {
     document.querySelector('input[name="fps"][value="60"]').checked
   `);
   if (!qualityRestored) throw new Error('La qualité du partage n’est pas mémorisée');
+  const audioRestored = await windows[0].webContents.executeJavaScript(`
+    (() => { const audio = JSON.parse(localStorage.getItem('annivelliot.profile.v1')).audio;
+      return audio.inputDeviceId === 'usb-mic' && audio.sensitivityMode === 'manual' && audio.thresholdDb === -38; })()
+  `);
+  if (!audioRestored) throw new Error('Le périphérique ou le seuil du micro n’a pas été conservé');
   for (const window of windows) {
     await window.webContents.executeJavaScript(`
       document.querySelector('#room').value = 'salon-integration-secret';
@@ -444,7 +584,7 @@ async function main() {
   if (!friendRestored) throw new Error('Les volumes de cet ami ne reviennent pas à la reconnexion');
   await windows[1].webContents.executeJavaScript("document.querySelector('#person-mute').click()");
   const unmutedVolume = await windows[1].webContents.executeJavaScript(
-    "Math.abs(document.querySelector('#remote-mic').volume - 0.4) < 0.001");
+    "Math.abs(document.querySelector('#remote-mic').volume - 0.2) < 0.001 && document.querySelector('#remote-system').sinkId === 'headphones' && document.querySelector('#master-volume').value === '50'");
   if (!unmutedVolume) throw new Error('Le volume enregistré ne revient pas après réactivation du son');
   record('prénom, qualité et volumes conservés à la reconnexion', true);
 }
