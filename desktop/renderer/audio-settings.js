@@ -198,5 +198,5 @@ export function createAudioSettings({ settings, save, outputs, onVolume, onNotic
     }
   });
   render();
-  return { start, stop, dialog };
+  return { start, stop, dialog, async listenOnly() { activeCall = true; render(); await ensureOutput(); } };
 }

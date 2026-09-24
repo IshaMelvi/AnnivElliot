@@ -3,11 +3,11 @@ import { normalizeAudioSettings } from './voice-gate.mjs';
 import { microphoneError } from './audio.js';
 import { createAudioSettings } from './audio-settings.js';
 import { startDiagnostics } from './diagnostics.js';
+import { normalizeQuality, screenBitrate } from './video-quality.mjs';
+import { createChat } from './chat.js';
 
 const SIGNAL_URL = 'https://annivelliot-signaling.onrender.com';
 const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-const BITRATES = { '720-30': 4_000_000, '720-60': 6_000_000,
-  '1080-30': 8_000_000, '1080-60': 12_000_000 };
 
 const $ = (selector) => document.querySelector(selector);
 const join = $('#join');
@@ -82,7 +82,7 @@ function loadProfile() {
     displayName: typeof stored.displayName === 'string' ? stored.displayName.slice(0, 32) : '',
     defaultVideoVolume: volumeOr(stored.defaultVideoVolume, 100),
     audio: normalizeAudioSettings(stored.audio),
-    quality: { height: quality.height === 1080 ? 1080 : 720, fps: quality.fps === 60 ? 60 : 30 },
+    quality: normalizeQuality(quality),
     friends: stored.friends && typeof stored.friends === 'object' && !Array.isArray(stored.friends)
       ? stored.friends : {}
   };
@@ -112,6 +112,7 @@ let peer = null;
 let negotiation = null;
 let polite = false;
 let micStream = null;
+let localAvStream = null;
 let cameraStream = null;
 let screenStream = null;
 let cameraSender = null;
@@ -137,9 +138,15 @@ let activeTab = 'window';
 let selectedSourceId = null;
 let screenSettings = { ...profile.quality };
 let hideTimer = null;
+let pickerGeneration = 0;
+let extendedSources = false;
+const remoteVideoElements = [mainVideo, pipVideo, splitRemoteVideo];
+const playbackAudio = new Map();
+const audioOnlyStreams = new WeakMap();
+const chat = createChat({ getSocket: () => socket, getPeerName: () => remoteName.textContent || 'Votre ami' });
 
 const audioSettings = createAudioSettings({
-  settings: profile.audio, save: saveProfile, outputs: [remoteMic, remoteSystem],
+  settings: profile.audio, save: saveProfile, outputs: [remoteMic, remoteSystem, ...remoteVideoElements],
   onVolume: applyIncomingVolume,
   onNotice: (text) => { if (call.hidden) joinStatus.textContent = text; else status(text); },
   onInputEnded: () => { refreshButtons(); sendMediaMap(); }
@@ -147,8 +154,31 @@ const audioSettings = createAudioSettings({
 startDiagnostics(() => ({ peer,
   sender: screenSenders.find((sender) => sender.track?.kind === 'video'),
   remoteTrack: remoteMap?.screenEnabled ? remoteStreams.get(remoteMap.screen)?.getVideoTracks()[0] : null,
+  remoteCameraTrack: remoteMap?.cameraEnabled ? remoteStreams.get(remoteMap.camera)?.getVideoTracks()[0] : null,
+  remoteMicTrack: remoteStreams.get(remoteMap?.mic)?.getAudioTracks()[0],
+  conversationGrouped: remoteMap?.cameraEnabled === true && remoteMap?.camera === remoteMap?.mic,
   capture: screenStream?.getVideoTracks()[0]?.getSettings(), target: screenSettings
 }));
+function updateBitrateLabels() {
+  $('#share-bitrate').value = String(screenSettings.bitrate);
+  $('#live-bitrate').value = String(screenSettings.bitrate);
+  $('#live-bitrate-value').textContent = screenBitrate(screenSettings) / 1e6 + ' Mbit/s';
+  const selected = { height: Number($('input[name="resolution"]:checked').value),
+    fps: Number($('input[name="fps"]:checked').value), bitrate: Number($('#share-bitrate').value) };
+  $('#bitrate-hint').textContent = 'Plafond : ' + screenBitrate(selected) / 1e6 + ' Mbit/s. Le débit réellement utilisé dépend de votre liaison et du contenu.';
+}
+updateBitrateLabels();
+$('#share-bitrate').addEventListener('change', () => {
+  screenSettings.bitrate = Number($('#share-bitrate').value);
+  profile.quality.bitrate = screenSettings.bitrate;
+  saveProfile(); updateBitrateLabels(); configureVideoSenders();
+});
+$('#live-bitrate').addEventListener('change', () => {
+  screenSettings.bitrate = Number($('#live-bitrate').value);
+  profile.quality.bitrate = screenSettings.bitrate;
+  saveProfile(); updateBitrateLabels(); configureVideoSenders();
+});
+document.querySelectorAll('input[name="resolution"], input[name="fps"]').forEach((input) => input.addEventListener('change', updateBitrateLabels));
 
 function status(message) {
   callStatus.textContent = audioWarning ? message + ' · ' + audioWarning : message;
@@ -157,7 +187,7 @@ function status(message) {
 function errorText(error) {
   if (error?.name === 'NotAllowedError') return 'Autorisation de capture refusée.';
   if (error?.name === 'NotFoundError') return 'Périphérique ou source introuvable.';
-  return error?.message || 'Une erreur est survenue.';
+  return error?.message?.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') || 'Une erreur est survenue.';
 }
 
 function setButton(button, active, activeLabel, inactiveLabel, slashWhenInactive = false) {
@@ -223,6 +253,7 @@ function applyIncomingVolume() {
   const personLevel = personMuted ? 0 : personVolume / 100 * profile.audio.masterVolume / 100;
   remoteMic.volume = personLevel;
   remoteSystem.volume = personLevel * videoVolume / 100;
+  for (const element of remoteVideoElements) element.volume = personLevel * (playbackAudio.get(element) === 'screen' ? videoVolume / 100 : 1);
   personVolumeValue.textContent = personVolume + ' %';
   videoVolumeValue.textContent = videoVolume + ' %';
   personMuteButton.setAttribute('aria-pressed', String(personMuted));
@@ -301,6 +332,10 @@ async function hashRoom(name) {
 
 joinForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  await joinRoom();
+});
+$('#join-without-mic').addEventListener('click', () => { if (joinForm.reportValidity()) joinRoom(true); });
+async function joinRoom(withoutMic = false) {
   if (busy) return;
   const name = roomInput.value.trim().normalize('NFC');
   if (name.length < 6) {
@@ -311,13 +346,16 @@ joinForm.addEventListener('submit', async (event) => {
   joinStatus.textContent = 'Activation du micro…';
   try {
     const nextHash = await hashRoom(name);
-    const capturedMic = await audioSettings.start();
+    const capturedMic = withoutMic ? null : await audioSettings.start();
     micStream = capturedMic;
+    localAvStream = new MediaStream();
+    if (withoutMic) await audioSettings.listenOnly();
     displayName = displayNameInput.value.trim().slice(0, 32);
     profile.displayName = displayName;
     saveProfile();
     roomHash = nextHash;
     sessionVersion += 1;
+    chat.reset();
     refreshButtons();
     updateRoster();
     join.hidden = true;
@@ -327,10 +365,11 @@ joinForm.addEventListener('submit', async (event) => {
   } catch (error) {
     audioSettings.stop();
     joinStatus.textContent = microphoneError(error);
+    $('#join-without-mic').hidden = false;
   } finally {
     busy = false;
   }
-});
+}
 
 function connectSignaling() {
   const current = io(SIGNAL_URL, {
@@ -355,6 +394,7 @@ function connectSignaling() {
         return;
       }
       polite = !response.peerPresent;
+      chat.connected(true);
       call.style.setProperty('--local-accent', polite ? '#a5b4fc' : '#c4b5fd');
       call.style.setProperty('--remote-accent', polite ? '#c4b5fd' : '#a5b4fc');
       remotePresent = Boolean(response.peerPresent);
@@ -374,6 +414,7 @@ function connectSignaling() {
   current.on('disconnect', () => {
     if (socket !== current) return;
     closePeer();
+    chat.connected(false);
     status('Connexion au serveur perdue. Reconnexion…');
   });
   current.on('peer-joined', () => {
@@ -387,6 +428,7 @@ function connectSignaling() {
     closePeer();
     status('Votre ami a quitté le salon. En attente…');
   });
+  current.on('chat-message', (data) => { if (socket === current) chat.receive(data); });
   current.on('signal', (message) => {
     signalQueue = signalQueue.then(() => {
       if (socket === current) return handleSignal(message);
@@ -403,15 +445,15 @@ function send(type, data) {
 }
 
 function sendMediaMap() {
-  if (!micStream) return;
+  if (!localAvStream) return;
   // Les identifiants inactifs gardent la compatibilité avec le serveur Render existant.
   send('media-map', {
-    mic: micStream.id,
-    camera: cameraStream?.id || 'inactive-camera',
+    mic: localAvStream.id,
+    camera: cameraStream ? localAvStream.id : 'inactive-camera',
     screen: screenStream?.id || 'inactive-screen',
     cameraEnabled: Boolean(cameraStream),
     screenEnabled: Boolean(screenStream),
-    micEnabled: Boolean(micStream.getAudioTracks()[0]?.enabled),
+    micEnabled: Boolean(micStream?.getAudioTracks()[0]?.enabled),
     displayName,
     profileId: profile.id
   });
@@ -429,7 +471,10 @@ function createPeer() {
   };
   connection.ontrack = (event) => {
     if (peer !== connection) return;
-    for (const stream of event.streams) remoteStreams.set(stream.id, stream);
+    for (const stream of event.streams) {
+      remoteStreams.set(stream.id, stream);
+      stream.onremovetrack = () => { if (peer === connection) updateVideos(); };
+    }
     updateVideos();
   };
   connection.onconnectionstatechange = () => {
@@ -456,8 +501,8 @@ function createPeer() {
     if (peer === connection && connection.signalingState === 'stable') configureVideoSenders();
   };
 
-  for (const track of micStream.getTracks()) connection.addTrack(track, micStream);
-  if (cameraStream) cameraSender = connection.addTrack(cameraStream.getVideoTracks()[0], cameraStream);
+  for (const track of micStream?.getAudioTracks() || []) connection.addTrack(track, localAvStream);
+  if (cameraStream) cameraSender = connection.addTrack(cameraStream.getVideoTracks()[0], localAvStream);
   if (screenStream) {
     screenSenders = screenStream.getTracks().map((track) => connection.addTrack(track, screenStream));
     configureVideoSenders();
@@ -473,7 +518,7 @@ async function handleSignal(message) {
     remoteMap = message.data;
     remotePresent = true;
     selectRemoteSettings(remoteMap);
-    if (previous?.camera !== remoteMap.camera) remoteStreams.delete(previous.camera);
+    if (previous?.camera !== remoteMap.camera && previous?.camera !== remoteMap.mic) remoteStreams.delete(previous.camera);
     if (previous?.screen !== remoteMap.screen) remoteStreams.delete(previous.screen);
     updateVideos();
     updateRoster();
@@ -540,13 +585,19 @@ function updateVideos() {
   stage.dataset.view = viewMode;
   emptyStage.dataset.owner = viewMode === 'local' || !remotePresent ? 'local' : 'remote';
 
+  // Each received AV group has exactly one audible element. When its video is
+  // visible, play audio on that same element so Chromium controls AV playout together.
+  for (const element of remoteVideoElements) element.muted = true;
+  remoteMic.muted = true;
+  remoteSystem.muted = true;
+  playbackAudio.clear();
   showMedia(mainVideo, main);
   showMedia(pipVideo, small);
   showMedia(localPipVideo, localSmall);
   showMedia(splitRemoteVideo, split ? remoteMain : null);
   showMedia(splitLocalVideo, split ? localMain : null);
-  showMedia(remoteMic, mic);
-  showMedia(remoteSystem, screen?.getAudioTracks().length ? screen : null);
+  routeGroupAudio('mic', mic, remoteMic, camera);
+  routeGroupAudio('screen', screen, remoteSystem, screen);
   applyIncomingVolume();
 
   mainVideo.hidden = split || !main;
@@ -572,6 +623,23 @@ function updateVideos() {
   pipMute.hidden = !(remoteMuted && viewMode === 'local' && small);
   if (!pip.hidden) fitPip(pip);
   if (!localPip.hidden) fitPip(localPip);
+}
+
+function audioOnly(stream) {
+  const tracks = stream?.getAudioTracks() || [];
+  if (!tracks.length) return null;
+  const previous = audioOnlyStreams.get(stream);
+  if (previous && previous.getAudioTracks().length === tracks.length && tracks.every((track) => previous.getTracks().includes(track))) return previous;
+  const audio = new MediaStream(tracks);
+  audioOnlyStreams.set(stream, audio);
+  return audio;
+}
+function routeGroupAudio(kind, stream, fallback, videoStream) {
+  // Keep the fallback attached to audio tracks only, avoiding a second video decoder.
+  showMedia(fallback, audioOnly(stream));
+  const visible = videoStream && remoteVideoElements.find((element) => element.srcObject === videoStream && videoStream.getAudioTracks().length);
+  if (visible) { playbackAudio.set(visible, kind); visible.muted = false; }
+  else fallback.muted = false;
 }
 
 function showMedia(element, stream) {
@@ -638,16 +706,29 @@ function closePeer() {
   updateVideos();
 }
 
-muteButton.addEventListener('click', () => {
+muteButton.addEventListener('click', async () => {
   const mic = micStream?.getAudioTracks()[0];
-  if (!mic) return;
+  if (!mic) {
+    if (busy || !roomHash) return;
+    busy = true;
+    const version = sessionVersion;
+    try {
+      const captured = await audioSettings.start();
+      if (version !== sessionVersion) { audioSettings.stop(); return; }
+      micStream = captured;
+      if (peer) peer.addTrack(captured.getAudioTracks()[0], localAvStream);
+      sendMediaMap(); refreshButtons();
+    } catch (error) { status(microphoneError(error)); }
+    finally { busy = false; }
+    return;
+  }
   mic.enabled = !mic.enabled;
   refreshButtons();
   sendMediaMap();
 });
 
 cameraButton.addEventListener('click', async () => {
-  if (busy || !micStream) return;
+  if (busy || !roomHash) return;
   if (cameraStream) {
     stopCamera();
     return;
@@ -665,7 +746,8 @@ cameraButton.addEventListener('click', async () => {
       return;
     }
     cameraStream = captured;
-    if (peer) cameraSender = peer.addTrack(captured.getVideoTracks()[0], captured);
+    captured.getVideoTracks()[0].contentHint = 'motion';
+    if (peer) cameraSender = peer.addTrack(captured.getVideoTracks()[0], localAvStream);
     configureVideoSenders();
     sendMediaMap();
     refreshButtons();
@@ -695,7 +777,7 @@ function stopCamera() {
 }
 
 shareButton.addEventListener('click', async () => {
-  if (busy || !micStream) return;
+  if (busy || !roomHash) return;
   if (screenStream) {
     stopScreen();
     return;
@@ -703,18 +785,21 @@ shareButton.addEventListener('click', async () => {
   await openPicker();
 });
 
-async function openPicker() {
+async function openPicker(extended = false, preserve = false) {
   busy = true;
   pickerStatus.textContent = '';
   $('#share-without-audio').hidden = true;
   const version = sessionVersion;
+  const request = ++pickerGeneration;
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
-    allSources = await window.desktop.listSources();
-    if (version !== sessionVersion) return;
+    const found = await window.desktop.listSources(extended);
+    if (version !== sessionVersion || request !== pickerGeneration) return;
+    allSources = found;
+    extendedSources = extended;
     if (!allSources.length) throw new Error('Aucune fenêtre ou écran disponible.');
-    activeTab = allSources.some((source) => source.kind === 'window') ? 'window' : 'screen';
-    selectedSourceId = null;
+    if (!preserve) activeTab = allSources.some((source) => source.kind === 'window') ? 'window' : 'screen';
+    if (!preserve || !allSources.some((source) => source.id === selectedSourceId)) selectedSourceId = null;
     renderSources();
     picker.hidden = false;
     $('#picker-close').focus();
@@ -742,11 +827,11 @@ function renderSources() {
     button.type = 'button';
     button.className = 'source';
     button.setAttribute('aria-pressed', String(selectedSourceId === source.id));
-    const image = document.createElement('img');
-    image.src = source.thumbnail;
-    image.alt = '';
+    const image = document.createElement(source.thumbnail ? 'img' : 'span');
+    if (source.thumbnail) { image.src = source.thumbnail; image.alt = ''; }
+    else { image.className = 'source-placeholder'; image.textContent = 'Fenêtre · aperçu indisponible'; }
     const label = document.createElement('span');
-    label.textContent = source.name;
+    label.textContent = source.name + (source.minimized ? ' · réduite, sera restaurée' : '');
     button.append(image, label);
     button.addEventListener('click', () => {
       selectedSourceId = source.id;
@@ -771,7 +856,9 @@ $('#tab-screen').addEventListener('click', () => {
   renderSources();
 });
 $('#picker-close').addEventListener('click', closePicker);
-$('#refresh-sources').addEventListener('click', () => { if (!busy) openPicker(); });
+$('#refresh-sources').addEventListener('click', () => { if (!busy) openPicker(extendedSources, true); });
+$('#extended-sources').hidden = window.desktop.platform !== 'win32';
+$('#extended-sources').addEventListener('click', () => { if (!busy) openPicker(true, true); });
 $('#system-audio').disabled = window.desktop.platform !== 'win32';
 $('#system-audio').checked = window.desktop.platform === 'win32';
 
@@ -810,9 +897,10 @@ async function startScreenShare() {
     const video = captured.getVideoTracks()[0];
     if (!video) throw new Error('La source sélectionnée ne contient pas de vidéo.');
     video.contentHint = 'motion';
-    screenSettings = { height, fps };
+    screenSettings = { height, fps, bitrate: Number($('#share-bitrate').value) };
     profile.quality = { ...screenSettings };
     saveProfile();
+    updateBitrateLabels();
     screenStream = captured;
     video.addEventListener('ended', () => {
       if (screenStream === captured) stopScreen('Le partage a été arrêté par le système.');
@@ -834,10 +922,12 @@ async function startScreenShare() {
   } catch (error) {
     captured?.getTracks().forEach((track) => track.stop());
     if (version !== sessionVersion) return;
-    const audioFailed = captureAudio && (error?.name === 'NotReadableError' || /audio source/i.test(error?.message || ''));
+    const audioFailed = captureAudio && /audio|loopback/i.test(error?.message || '');
     pickerStatus.textContent = audioFailed
       ? 'Windows n’a pas pu capturer le son du partage. Vérifiez qu’une sortie audio est active (casque ou haut-parleurs), puis réessayez. Si besoin, fermez les applications audio ou désactivez leur mode exclusif. Vous pouvez aussi tester le partage sans son.'
-      : errorText(error);
+      : error?.name === 'NotReadableError'
+        ? 'Windows n’a pas pu capturer cette fenêtre. Restaurez-la ou partagez l’écran entier où elle s’affiche.'
+        : errorText(error);
     $('#share-without-audio').hidden = !audioFailed;
   } finally {
     busy = false;
@@ -853,9 +943,15 @@ $('#share-without-audio').addEventListener('click', () => {
 
 const senderUpdates = new WeakMap();
 function configureSender(sender, screen) {
-  if (!sender?.track || senderUpdates.has(sender)) return;
-  const operation = applySenderQuality(sender, screen).finally(() => senderUpdates.delete(sender));
-  senderUpdates.set(sender, operation);
+  if (!sender?.track) return;
+  if (senderUpdates.has(sender)) { senderUpdates.get(sender).dirty = true; return; }
+  const state = { dirty: true };
+  senderUpdates.set(sender, state);
+  (async () => {
+    try {
+      while (state.dirty && sender.track) { state.dirty = false; await applySenderQuality(sender, screen); }
+    } finally { senderUpdates.delete(sender); }
+  })();
 }
 function configureVideoSenders() {
   configureSender(screenSenders.find((sender) => sender.track?.kind === 'video'), true);
@@ -866,9 +962,9 @@ async function applySenderQuality(sender, screen) {
     const params = sender.getParameters();
     // Chromium may expose no encodings until SDP is negotiated; retry at stable signaling.
     if (!params.encodings?.length) return;
-    params.encodings[0].maxBitrate = screen ? BITRATES[screenSettings.height + '-' + screenSettings.fps] : 1_200_000;
+    params.encodings[0].maxBitrate = screen ? screenBitrate(screenSettings) : 2_500_000;
     params.encodings[0].maxFramerate = screen ? screenSettings.fps : 30;
-    params.encodings[0].priority = screen ? 'high' : 'low';
+    params.encodings[0].priority = 'medium';
     params.degradationPreference = 'maintain-framerate';
     await sender.setParameters(params);
   } catch (error) {
@@ -1016,6 +1112,8 @@ function leave(message = '') {
     document.exitFullscreen().catch((error) => console.warn('Sortie du plein écran :', error));
   }
   sessionVersion += 1;
+  pickerGeneration++;
+  chat.reset();
   audioSettings.stop();
   audioSettings.dialog.close();
   const previousSocket = socket;
@@ -1026,6 +1124,7 @@ function leave(message = '') {
     stream?.getTracks().forEach((track) => track.stop());
   }
   micStream = null;
+  localAvStream = null;
   cameraStream = null;
   screenStream = null;
   roomHash = null;

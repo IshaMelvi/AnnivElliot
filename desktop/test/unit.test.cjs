@@ -76,3 +76,53 @@ test('diagnostics use interval deltas, not lifetime averages', async () => {
   assert.equal(result.bufferMs, 100);
   assert.equal(summarizeRtp({ ...after, id: 'new' }, before, 'receive').mbps, null);
 });
+
+test('extended Windows enumeration adds missing windows, deduplicates handles and restores only the chosen one', async () => {
+  let restored = null;
+  let found = [{ id: 'window:12:0', name: 'Game', minimized: true }, { id: 'window:10:0', name: 'Duplicate' }];
+  const registry = createCaptureSources(async () => [source('window:10:1')], {
+    listWindows: async () => found, restoreWindow: async (id) => { restored = id; }
+  });
+  const normal = await registry.list();
+  assert.equal(normal.length, 1);
+  await assert.rejects(registry.select('window:12:0'), /liste/);
+  const extended = await registry.list(true);
+  assert.equal(extended.length, 2);
+  assert.equal(extended[1].minimized, true);
+  assert.equal(restored, null);
+  await registry.select('window:12:0');
+  assert.equal(restored, 'window:12:0');
+  assert.equal(registry.consume(true, 'win32').video.name, 'Game');
+  found = [];
+  await assert.rejects(registry.select('window:12:0'), /fermée/);
+});
+test('bitrate settings are bounded and survive changes of resolution', async () => {
+  const { normalizeQuality, screenBitrate } = await import('../renderer/video-quality.mjs');
+  assert.equal(screenBitrate(normalizeQuality({ height: 1080, fps: 60 })), 20_000_000);
+  assert.equal(screenBitrate(normalizeQuality({ height: 720, fps: 30, bitrate: 8 })), 8_000_000);
+  assert.equal(normalizeQuality({ bitrate: 1e12 }).bitrate, 0);
+});
+test('chat requires membership and a peer, validates text, and limits message frequency', () => {
+  const { attachChat } = require('../../signaling/chat.cjs');
+  let handler;
+  const sent = [];
+  const socket = { data: {}, rooms: new Set(), on: (_, callback) => { handler = callback; },
+    to: (room) => ({ emit: (event, data) => sent.push({ room, event, data }) }) };
+  const rooms = new Map([['secret', new Set(['self', 'friend'])]]);
+  attachChat({ sockets: { adapter: { rooms } } }, socket);
+  let result;
+  const emit = (data) => handler(data, (ack) => { result = ack; });
+  emit({ text: 'hello' }); assert.equal(result.ok, false);
+  socket.data.room = 'secret'; socket.rooms.add('secret');
+  emit({ text: 'x'.repeat(1001) }); assert.equal(result.ok, false);
+  emit({ text: '   ' }); assert.equal(result.ok, false);
+  rooms.set('secret', new Set(['self']));
+  emit({ text: 'hello' }); assert.equal(result.ok, false);
+  rooms.set('secret', new Set(['self', 'friend']));
+  emit({ text: '<img src=x onerror=alert(1)>', room: 'another-room' });
+  assert.equal(result.ok, true);
+  assert.equal(sent[0].room, 'secret');
+  assert.equal(sent[0].data.text, '<img src=x onerror=alert(1)>');
+  emit({ text: 'spam' }); assert.equal(result.ok, false);
+  assert.equal(sent.length, 1);
+});

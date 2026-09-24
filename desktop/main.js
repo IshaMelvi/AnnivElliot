@@ -2,6 +2,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { app, BrowserWindow, desktopCapturer, ipcMain, session } = require('electron');
 const { createCaptureSources } = require('./capture-sources.cjs');
+const windowsSources = process.platform === 'win32' ? require('./windows-sources.cjs') : null;
 
 // Keep the existing Chromium profile when the visible app name changes.
 const profileDirectory = path.join(app.getPath('appData'), 'annivelliot-desktop');
@@ -12,7 +13,7 @@ app.setName('CherubLink');
 if (process.platform === 'win32') app.setAppUserModelId('ch.annivelliot.stream');
 
 let window;
-const captureSources = createCaptureSources((options) => desktopCapturer.getSources(options));
+const captureSources = createCaptureSources((options) => desktopCapturer.getSources(options), windowsSources);
 
 function ownWindow(event) {
   return window && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame;
@@ -58,9 +59,9 @@ app.whenReady().then(() => {
     callback(captureSources.consume(request.audioRequested, process.platform));
   });
 
-  ipcMain.handle('list-sources', async (event) => {
+  ipcMain.handle('list-sources', async (event, extended) => {
     if (!ownWindow(event)) throw new Error('Accès refusé.');
-    return captureSources.list();
+    return captureSources.list(extended === true);
   });
 
   ipcMain.handle('select-source', async (event, id, systemAudio) => {

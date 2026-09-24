@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('node:http');
 const { Server } = require('socket.io');
+const { attachChat } = require('./chat.cjs');
 
 const app = express();
 app.get('/health', (_request, response) => response.json({ ok: true }));
@@ -27,6 +28,7 @@ function validSignal(message) {
 }
 
 io.on('connection', (socket) => {
+  attachChat(io, socket);
   socket.on('join-room', async (room, reply) => {
     if (typeof reply !== 'function') return;
     if (typeof room !== 'string' || !/^[a-f0-9]{64}$/.test(room)) {

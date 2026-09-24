@@ -2,7 +2,7 @@ import { summarizeRtp } from './stream-stats.mjs';
 
 export function startDiagnostics(getState) {
   const $ = (id) => document.getElementById(id);
-  let previous = { send: null, receive: null };
+  let previous = {};
   let lastPeer = null;
   let sampling = false;
   let latest = { message: 'Aucune mesure disponible. Ouvrez les paramètres pendant un partage.' };
@@ -14,13 +14,13 @@ ${number(data.mbps, ' Mbit/s', 2)} · ${data.codec || 'codec en attente'}
 ${data.encodeMs !== null ? 'Encodage : ' + number(data.encodeMs, ' ms/image', 1) : 'Pertes : ' + number(data.loss, ' %', 1)}
 ${data.bufferMs !== null ? 'Tampon : ' + number(data.bufferMs, ' ms') : 'Limite : ' + ({ cpu: 'processeur', bandwidth: 'réseau', none: 'aucune', other: 'autre' }[data.limitation] || '—')}`;
   }
-  async function sampleDirection(endpoint, direction) {
-    if (!endpoint) { previous[direction] = null; return null; }
+  async function sampleDirection(endpoint, direction, key = direction) {
+    if (!endpoint) { previous[key] = null; return null; }
     const report = await endpoint.getStats();
-    const stats = [...report.values()].find((item) => item.type === (direction === 'send' ? 'outbound-rtp' : 'inbound-rtp') && item.kind === 'video' && !item.isRemote);
+    const stats = [...report.values()].find((item) => item.type === (direction === 'send' ? 'outbound-rtp' : 'inbound-rtp') && item.kind === endpoint.track.kind && !item.isRemote);
     if (!stats) return null;
-    const summary = summarizeRtp(stats, previous[direction], direction);
-    previous[direction] = stats;
+    const summary = summarizeRtp(stats, previous[key], direction);
+    previous[key] = stats;
     summary.codec = report.get(stats.codecId)?.mimeType?.replace('video/', '');
     const transport = report.get(stats.transportId);
     const pair = report.get(transport?.selectedCandidatePairId);
@@ -34,14 +34,18 @@ ${data.bufferMs !== null ? 'Tampon : ' + number(data.bufferMs, ' ms') : 'Limite 
     sampling = true;
     try {
       const state = getState();
-      if (state.peer !== lastPeer) { previous = { send: null, receive: null }; lastPeer = state.peer; }
+      if (state.peer !== lastPeer) { previous = {}; lastPeer = state.peer; }
       const receiver = state.peer?.getReceivers().find((item) => item.track === state.remoteTrack);
-      const [send, receive] = await Promise.all([
-        sampleDirection(state.sender, 'send'), sampleDirection(receiver, 'receive')
+      const cameraReceiver = state.peer?.getReceivers().find((item) => item.track === state.remoteCameraTrack);
+      const micReceiver = state.peer?.getReceivers().find((item) => item.track === state.remoteMicTrack);
+      const [send, receive, camera, microphone] = await Promise.all([
+        sampleDirection(state.sender, 'send'), sampleDirection(receiver, 'receive'),
+        sampleDirection(cameraReceiver, 'receive', 'camera'), sampleDirection(micReceiver, 'receive', 'microphone')
       ]);
       if (getState().peer !== state.peer) return;
       const capture = state.capture ? { width: state.capture.width, height: state.capture.height, fps: state.capture.frameRate } : null;
-      latest = { measuredAt: new Date().toISOString(), target: state.target, capture, send, receive };
+      latest = { measuredAt: new Date().toISOString(), target: state.target, capture, send, receive,
+        conversation: { camera, microphone, sharedStream: state.conversationGrouped } };
       $('stats-send').textContent = describe(send);
       $('stats-receive').textContent = describe(receive);
       let advice = 'Le débit et la résolution s’adaptent à la connexion pour préserver la fluidité. Pour un film, commencez en 1080p / 30 fps.';
@@ -54,7 +58,7 @@ ${data.bufferMs !== null ? 'Tampon : ' + number(data.bufferMs, ' ms') : 'Limite 
   }
   setInterval(sample, 2000);
   document.querySelectorAll('.settings-open').forEach((button) => button.addEventListener('click', () => {
-    previous = { send: null, receive: null };
+    previous = {};
     sample();
   }));
   $('copy-diagnostics').addEventListener('click', async () => {

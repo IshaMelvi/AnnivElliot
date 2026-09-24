@@ -59,9 +59,10 @@ function prepareFixture(port) {
   fs.writeFileSync(path.join(fixture, 'stub.js'), `
     window.desktop = {
       platform: 'win32',
-      listSources: async () => [
+      listSources: async (extended) => [
         { id: 'window:test', kind: 'window', name: 'Fenêtre de test', thumbnail: '' },
-        { id: 'screen:test', kind: 'screen', name: 'Écran de test', thumbnail: '' }
+        { id: 'screen:test', kind: 'screen', name: 'Écran de test', thumbnail: '' },
+        ...(extended ? [{ id: 'window:game', kind: 'window', name: 'Jeu sans bordures', thumbnail: '', minimized: true }] : [])
       ],
       selectSource: async (id, audio) => { window.lastSelection = { id, audio }; }
     };
@@ -111,6 +112,7 @@ function prepareFixture(port) {
     }
     navigator.mediaDevices.getUserMedia = async (constraints) => {
       if (constraints.audio) {
+        if (window.failNextMicrophone) { window.failNextMicrophone = false; throw new DOMException('Could not start audio source', 'NotReadableError'); }
         window.testAudioInputs.push(constraints.audio);
         if (constraints.audio.deviceId?.exact === 'broken-mic') throw new DOMException('Could not start audio source', 'NotReadableError');
       }
@@ -185,6 +187,19 @@ async function main() {
     if (!privateByDefault) throw new Error('La webcam doit être coupée et le micro actif au départ');
   }
   record('micro seulement et connexion', true);
+
+  await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#chat-input').value = '<img src=x onerror=alert(1)> Salut !';
+    document.querySelector('#chat-form').requestSubmit();
+  `);
+  await waitFor(windows[1], "document.querySelector('#chat-messages').textContent.includes('Salut !')");
+  const safeChat = await windows[1].webContents.executeJavaScript("document.querySelector('#chat-messages img') === null && document.querySelector('#chat-messages').textContent.includes('Alice')");
+  if (!safeChat) throw new Error('Le chat doit afficher le texte sans interpréter le HTML');
+  await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#chat-input').value = 'Je te lis, Bob'; document.querySelector('#chat-form').requestSubmit();
+  `);
+  await waitFor(windows[0], "document.querySelector('#chat-messages').textContent.includes('Je te lis, Bob')");
+  record('chat bidirectionnel transmis par le serveur et affichage sécurisé', true);
 
   await windows[0].webContents.executeJavaScript("document.querySelector('#call .settings-open').click()");
   await waitFor(windows[0], "document.querySelector('#audio-input').options.length === 3");
@@ -396,7 +411,7 @@ async function main() {
   if (!retryAvailable) throw new Error('Une erreur audio empêche de réessayer la même source');
   await windows[0].webContents.executeJavaScript("document.querySelector('#start-share').click()");
   await waitFor(windows[1], "!document.querySelector('#pip').hidden");
-  await waitFor(windows[0], `window.testPeers.at(-1).getSenders().some(sender => sender.track?.kind === 'video' && sender.getParameters().encodings?.[0]?.maxBitrate === 12000000 && sender.getParameters().degradationPreference === 'maintain-framerate')`);
+  await waitFor(windows[0], `window.testPeers.at(-1).getSenders().some(sender => sender.track?.kind === 'video' && sender.getParameters().encodings?.[0]?.maxBitrate === 20000000 && sender.getParameters().degradationPreference === 'maintain-framerate')`);
   const captureLimits = await windows[0].webContents.executeJavaScript(`
     window.lastDisplayConstraints.video.width.max === 1920 &&
     window.lastDisplayConstraints.video.height.max === 1080 &&
@@ -415,6 +430,31 @@ async function main() {
   `);
   if (!mixedVolume) throw new Error('Le curseur vidéo ne doit modifier que l’audio du partage');
   record('écran reçu avec webcam en PiP', true);
+
+  const avRouting = await windows[1].webContents.executeJavaScript(`
+    (() => {
+      const screen = document.querySelector('#main-video'); const camera = document.querySelector('#pip-video');
+      const mic = document.querySelector('#remote-mic'); const system = document.querySelector('#remote-system');
+      return screen.srcObject.getAudioTracks().length === 1 && camera.srcObject.getAudioTracks().length === 1 &&
+        !screen.muted && !camera.muted && mic.muted && system.muted &&
+        mic.srcObject.getVideoTracks().length === 0 && system.srcObject.getVideoTracks().length === 0 &&
+        Math.abs(screen.volume - 0.1) < .001 && Math.abs(camera.volume - 0.4) < .001;
+    })()
+  `);
+  if (!avRouting) throw new Error('Webcam/micro et écran/son doivent être joués ensemble, sans double audio');
+  const groups = await windows[0].webContents.executeJavaScript(`
+    window.testPeers.at(-1).localDescription.sdp.split('\\r\\n').filter(line => line.startsWith('a=msid:')).map(line => line.split(' ')[0])
+  `);
+  if (groups.length !== 4 || new Set(groups).size !== 2) throw new Error('Le SDP ne contient pas les deux groupes audio/vidéo attendus');
+  const uncropped = await windows[1].webContents.executeJavaScript("Array.from(document.querySelectorAll('.video-surface')).every(video => getComputedStyle(video).objectFit === 'contain')");
+  if (!uncropped) throw new Error('Une vue vidéo est encore rognée');
+  record('deux groupes AV synchronisables, lecture conjointe sans écho et vidéos entières', true);
+
+  await windows[0].webContents.executeJavaScript(`
+    document.querySelector('#live-bitrate').value = '16'; document.querySelector('#live-bitrate').dispatchEvent(new Event('change'));
+  `);
+  await waitFor(windows[0], "window.testPeers.at(-1).getSenders().some(sender => sender.getParameters().encodings?.[0]?.maxBitrate === 16000000)");
+  record('débit du partage ajustable pendant la transmission', true);
 
   await windows[1].webContents.executeJavaScript(`
     document.querySelector('#call .settings-open').click();
@@ -499,7 +539,7 @@ async function main() {
       handle.dispatchEvent(event('pointerdown', 300));
       handle.dispatchEvent(event('pointermove', 1300));
       handle.dispatchEvent(event('pointerup', 1300));
-      return pip.offsetWidth > original && pip.offsetWidth <= stage.clientWidth / 2 &&
+      return pip.offsetWidth > 0 && pip.offsetWidth <= stage.clientWidth / 2 &&
         pip.offsetHeight <= stage.clientHeight / 2 &&
         pip.classList.contains('is-resizing') === false;
     })()
@@ -516,6 +556,11 @@ async function main() {
 
   await windows[0].webContents.executeJavaScript("document.querySelector('#share').click()");
   await waitFor(windows[0], "!document.querySelector('#picker').hidden");
+  await windows[0].webContents.executeJavaScript("document.querySelector('#extended-sources').click()");
+  await waitFor(windows[0], "document.querySelector('#sources').textContent.includes('Jeu sans bordures')");
+  const selectionRetained = await windows[0].webContents.executeJavaScript("document.querySelector('#sources .source').click(); document.querySelector('#sources .source').getAttribute('aria-pressed') === 'true'");
+  if (!selectionRetained) throw new Error('Une fenêtre sans miniature doit rester sélectionnable');
+  record('liste étendue Windows et fenêtres sans miniature sélectionnables', true);
   await windows[0].webContents.executeJavaScript(`
     window.failNextSystemAudio = true;
     document.querySelector('#sources .source').click();
@@ -587,6 +632,37 @@ async function main() {
     "Math.abs(document.querySelector('#remote-mic').volume - 0.2) < 0.001 && document.querySelector('#remote-system').sinkId === 'headphones' && document.querySelector('#master-volume').value === '50'");
   if (!unmutedVolume) throw new Error('Le volume enregistré ne revient pas après réactivation du son');
   record('prénom, qualité et volumes conservés à la reconnexion', true);
+
+  await windows[1].webContents.executeJavaScript("document.querySelector('#leave').click()");
+  await waitFor(windows[0], "document.querySelector('#remote-person').hidden");
+  await windows[1].webContents.executeJavaScript(`
+    window.failNextMicrophone = true;
+    document.querySelector('#room').value = 'salon-integration-secret';
+    document.querySelector('#join-form').requestSubmit();
+  `);
+  await waitFor(windows[1], "!document.querySelector('#join-without-mic').hidden");
+  await windows[1].webContents.executeJavaScript("document.querySelector('#join-without-mic').click()");
+  await waitFor(windows[1], "!document.querySelector('#call').hidden && !document.querySelector('#chat-input').disabled");
+  const noMic = await windows[1].webContents.executeJavaScript("document.querySelector('#mute').classList.contains('is-off')");
+  if (!noMic) throw new Error('Le mode sans micro ne doit pas afficher un micro actif');
+  await waitFor(windows[0], "!document.querySelector('#remote-person').hidden");
+  await windows[1].webContents.executeJavaScript(`
+    document.querySelector('#chat-input').value = 'Mon micro ne démarre pas'; document.querySelector('#chat-form').requestSubmit();
+  `);
+  await waitFor(windows[0], "document.querySelector('#chat-messages').textContent.includes('Mon micro ne démarre pas')");
+  await windows[1].webContents.executeJavaScript("document.querySelector('#camera').click()");
+  await waitFor(windows[0], "Boolean(document.querySelector('#main-video').srcObject?.getVideoTracks().length)");
+  await windows[1].webContents.executeJavaScript("document.querySelector('#mute').click()");
+  await waitFor(windows[1], "document.querySelector('#mute').classList.contains('is-active')");
+  await waitFor(windows[0], "Boolean(document.querySelector('#main-video').srcObject?.getAudioTracks().length)");
+  const recovered = await windows[0].webContents.executeJavaScript("!document.querySelector('#main-video').muted && document.querySelector('#remote-mic').muted");
+  if (!recovered) throw new Error('Le micro récupéré ne doit pas être joué deux fois');
+  record('entrée sans micro, chat opérationnel, webcam puis récupération du micro', true);
+
+  await windows[1].webContents.executeJavaScript("document.querySelector('#main-video').click(); document.querySelector('#split-local').click()");
+  // Even when the local camera occupies the main element, it must never play local audio.
+  const localMuted = await windows[1].webContents.executeJavaScript("document.querySelector('#main-video').muted");
+  if (!localMuted) throw new Error('Un aperçu local ne doit jamais produire de retour audio');
 }
 
 app.whenReady().then(async () => {

@@ -9,6 +9,7 @@ export function summarizeRtp(now, previous, direction) {
   const encode = delta('totalEncodeTime');
   const buffer = delta('jitterBufferDelay');
   const emitted = delta('jitterBufferEmittedCount');
+  const targetBuffer = delta('jitterBufferTargetDelay');
   return {
     width: now.frameWidth, height: now.frameHeight,
     fps: elapsed > 0 && frames !== null ? frames / elapsed : now.framesPerSecond,
@@ -16,6 +17,8 @@ export function summarizeRtp(now, previous, direction) {
     loss: packets !== null && lost !== null && packets + lost > 0 ? lost / (packets + lost) * 100 : null,
     encodeMs: frames > 0 && encode !== null ? encode / frames * 1000 : null,
     bufferMs: emitted > 0 && buffer !== null ? buffer / emitted * 1000 : null,
+    targetBufferMs: emitted > 0 && targetBuffer !== null ? targetBuffer / emitted * 1000 : null,
+    quantizer: frames > 0 && delta('qpSum') !== null ? delta('qpSum') / frames : null,
     dropped: delta('framesDropped'), freezes: delta('freezeCount'),
     limitation: now.qualityLimitationReason || null,
     encoder: now.encoderImplementation || null, decoder: now.decoderImplementation || null,

@@ -37,6 +37,7 @@
         <p class="join-privacy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg>Seul ton micro est actif à l'entrée.</p>
         <p id="room-hint" class="hint">Utilise un nom de salon long et difficile à deviner. Ton prénom et tes réglages sont mémorisés sur cet ordinateur.</p>
         <p id="join-status" class="message" role="status"></p>
+        <button id="join-without-mic" class="secondary" type="button" hidden>Entrer sans micro et utiliser le chat</button>
         <button class="secondary settings-open" type="button">Paramètres audio</button>
       </section>
     </div>
@@ -62,10 +63,16 @@
           <label><input type="radio" name="fps" value="30" checked> 30 fps</label>
           <label><input type="radio" name="fps" value="60"> 60 fps</label>
         </fieldset>
+        <fieldset class="bitrate-field"><legend>Débit vidéo maximal</legend>
+          <select id="share-bitrate" aria-label="Débit vidéo maximal"><option value="0">Recommandé selon la qualité</option><option value="4">4 Mbit/s</option><option value="6">6 Mbit/s</option><option value="8">8 Mbit/s</option><option value="12">12 Mbit/s</option><option value="16">16 Mbit/s</option><option value="20">20 Mbit/s</option><option value="30">30 Mbit/s</option></select>
+        </fieldset>
       </div>
+      <p id="bitrate-hint" class="settings-help"></p>
       <label class="capture-audio"><input id="system-audio" type="checkbox" checked> Partager le son de l’ordinateur</label>
       <p class="settings-help">30 fps convient aux films. 60 fps demande plus de débit et de puissance. Le son partagé comprend les applications de l’ordinateur.</p>
       <button id="refresh-sources" class="secondary" type="button">Actualiser les fenêtres</button>
+      <p class="settings-help">Fenêtre de jeu absente ? Lancez la recherche étendue Windows. Une fenêtre réduite sera restaurée si vous la choisissez. Si la capture du jeu reste indisponible, partagez l’écran qui l’affiche.</p>
+      <button id="extended-sources" class="secondary" type="button">Recherche étendue Windows</button>
       <p id="picker-status" class="message" role="status"></p>
       <button id="share-without-audio" class="secondary" type="button" hidden>Réessayer sans le son du partage</button>
       <button id="start-share" class="primary" type="button" disabled>Démarrer le partage</button>
@@ -92,6 +99,7 @@
         <button class="secondary settings-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-1 3-3 1-2 3 2 2-1 3 3 2 3-1 2 3 3-1 1-3 3-1 2-3-2-2 1-3-3-2-3 1-2-3z"/><circle cx="12" cy="11" r="3"/></svg>Paramètres</button>
       </div>
     </aside>
+    <div class="call-content">
     <section id="video-area" class="video-area" aria-label="Vidéos du salon">
       <div id="stage" class="stage">
         <video id="main-video" class="video-surface" autoplay playsinline muted role="button" tabindex="0" aria-label="Afficher les deux vidéos côte à côte"></video>
@@ -155,6 +163,12 @@
         </div>
       </div>
     </section>
+    <section class="chat-panel glass" aria-label="Chat du salon">
+      <div class="chat-heading"><strong>Chat</strong><span id="chat-status" role="status">Chat en attente de connexion…</span><button id="chat-new" class="secondary" type="button" hidden>Nouveaux messages ↓</button></div>
+      <div id="chat-messages" class="chat-messages" role="log" aria-label="Messages du salon" aria-live="polite" aria-relevant="additions"></div>
+      <form id="chat-form" class="chat-form"><label class="sr-only" for="chat-input">Message à votre ami</label><input id="chat-input" maxlength="1000" autocomplete="off" placeholder="Un souci de son ? Écris ici…" disabled><button id="chat-send" class="secondary" type="submit" disabled>Envoyer</button></form>
+    </section>
+    </div>
   </main>
 
   <dialog id="settings-dialog" class="settings-dialog glass" aria-labelledby="settings-title">
@@ -190,6 +204,9 @@
       <div class="diagnostics-heading"><h3 id="quality-title">Qualité du partage</h3><button id="copy-diagnostics" class="secondary" type="button">Copier le diagnostic</button></div>
       <dl class="diagnostics-grid"><div><dt>Votre envoi</dt><dd id="stats-send">Aucun partage</dd></div><div><dt>Votre réception</dt><dd id="stats-receive">Aucun partage</dd></div></dl>
       <p id="stats-advice" class="settings-help">Les mesures s’affichent pendant un partage. Elles permettent de distinguer le débit réseau de la vitesse de traitement vidéo.</p>
+      <label class="range-label" for="live-bitrate">Débit maximal du partage <output id="live-bitrate-value"></output></label>
+      <select id="live-bitrate"><option value="0">Recommandé selon la qualité</option><option value="4">4 Mbit/s</option><option value="6">6 Mbit/s</option><option value="8">8 Mbit/s</option><option value="12">12 Mbit/s</option><option value="16">16 Mbit/s</option><option value="20">20 Mbit/s</option><option value="30">30 Mbit/s</option></select>
+      <p class="settings-help">Appliqué au partage en cours. Un plafond plus élevé peut réduire la compression si le réseau le permet ; il ne garantit pas ce débit.</p>
     </section>
     <p id="settings-status" class="message" role="status"></p>
   </dialog>
