@@ -5,6 +5,7 @@ import { createAudioSettings } from './audio-settings.js';
 import { startDiagnostics } from './diagnostics.js';
 import { normalizeQuality, screenBitrate } from './video-quality.mjs';
 import { createChat } from './chat.js';
+import { createUpdates } from './updates.js';
 
 const SIGNAL_URL = 'https://annivelliot-signaling.onrender.com';
 const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -151,6 +152,7 @@ const audioSettings = createAudioSettings({
   onNotice: (text) => { if (call.hidden) joinStatus.textContent = text; else status(text); },
   onInputEnded: () => { refreshButtons(); sendMediaMap(); }
 });
+const updates = createUpdates();
 startDiagnostics(() => ({ peer,
   sender: screenSenders.find((sender) => sender.track?.kind === 'video'),
   remoteTrack: remoteMap?.screenEnabled ? remoteStreams.get(remoteMap.screen)?.getVideoTracks()[0] : null,
@@ -343,6 +345,11 @@ async function joinRoom(withoutMic = false) {
     return;
   }
   busy = true;
+  if (!await updates.setSessionActive(true)) {
+    busy = false;
+    joinStatus.textContent = 'L’application redémarre pour une mise à jour. Réessayez après son ouverture.';
+    return;
+  }
   joinStatus.textContent = 'Activation du micro…';
   try {
     const nextHash = await hashRoom(name);
@@ -364,6 +371,7 @@ async function joinRoom(withoutMic = false) {
     connectSignaling();
   } catch (error) {
     audioSettings.stop();
+    await updates.setSessionActive(false);
     joinStatus.textContent = microphoneError(error);
     $('#join-without-mic').hidden = false;
   } finally {
@@ -1128,6 +1136,7 @@ function leave(message = '') {
   cameraStream = null;
   screenStream = null;
   roomHash = null;
+  updates.setSessionActive(false);
   audioWarning = '';
   busy = false;
   picker.hidden = true;

@@ -38,7 +38,8 @@
         <p id="room-hint" class="hint">Utilise un nom de salon long et difficile à deviner. Ton prénom et tes réglages sont mémorisés sur cet ordinateur.</p>
         <p id="join-status" class="message" role="status"></p>
         <button id="join-without-mic" class="secondary" type="button" hidden>Entrer sans micro et utiliser le chat</button>
-        <button class="secondary settings-open" type="button">Paramètres audio</button>
+        <button class="secondary settings-open" type="button">Paramètres</button>
+        <button class="secondary settings-open update-notice" type="button" hidden></button>
       </section>
     </div>
   </main>
@@ -95,6 +96,7 @@
         <button id="person-mute" type="button" aria-pressed="false">Rendre muet</button>
       </div>
       <div class="sidebar-footer">
+        <button class="secondary settings-open update-notice" type="button" hidden></button>
         <p class="sidebar-hint">Clic droit sur un prénom pour régler son son.</p>
         <button class="secondary settings-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-1 3-3 1-2 3 2 2-1 3 3 2 3-1 2 3 3-1 1-3 3-1 2-3-2-2 1-3-3-2-3 1-2-3z"/><circle cx="12" cy="11" r="3"/></svg>Paramètres</button>
       </div>
@@ -176,6 +178,17 @@
       <div><span class="badge">À VOTRE ÉCOUTE</span><h2 id="settings-title">Paramètres</h2><p>Vos réglages sont enregistrés sur cet ordinateur.</p></div>
       <button id="settings-close" class="picker-close" type="button" aria-label="Fermer les paramètres">×</button>
     </div>
+    <section id="update-section" class="settings-section update-section" aria-labelledby="update-title">
+      <div class="update-heading"><h3 id="update-title">Mises à jour</h3><span id="app-version" class="version-badge">CherubLink</span></div>
+      <p id="update-status" class="update-status" role="status">Initialisation…</p>
+      <div id="update-progress-wrap" class="update-progress-wrap" hidden><progress id="update-progress" max="100" value="0" aria-label="Téléchargement de la mise à jour"></progress><output id="update-percent">0 %</output></div>
+      <div class="update-actions">
+        <button id="update-check" class="secondary" type="button" hidden>Rechercher une mise à jour</button>
+        <button id="update-download" class="primary" type="button" hidden>Télécharger la mise à jour</button>
+        <button id="update-install" class="primary" type="button" hidden>Redémarrer et installer</button>
+      </div>
+      <p id="update-help" class="settings-help"></p>
+    </section>
     <div class="settings-grid">
       <section class="settings-section" aria-labelledby="input-title">
         <h3 id="input-title">Microphone</h3>

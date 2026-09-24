@@ -2,6 +2,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { app, BrowserWindow, desktopCapturer, ipcMain, session } = require('electron');
 const { createCaptureSources } = require('./capture-sources.cjs');
+const { createUpdater } = require('./updater.cjs');
 const windowsSources = process.platform === 'win32' ? require('./windows-sources.cjs') : null;
 
 // Keep the existing Chromium profile when the visible app name changes.
@@ -13,6 +14,14 @@ app.setName('CherubLink');
 if (process.platform === 'win32') app.setAppUserModelId('ch.annivelliot.stream');
 
 let window;
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+app.on('second-instance', () => {
+  if (!window) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+});
 const captureSources = createCaptureSources((options) => desktopCapturer.getSources(options), windowsSources);
 
 function ownWindow(event) {
@@ -20,6 +29,7 @@ function ownWindow(event) {
 }
 
 app.whenReady().then(() => {
+  if (!primaryInstance) return;
   window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -67,6 +77,28 @@ app.whenReady().then(() => {
   ipcMain.handle('select-source', async (event, id, systemAudio) => {
     if (!ownWindow(event)) throw new Error('Accès refusé.');
     await captureSources.select(id, systemAudio);
+  });
+
+  const updatesEnabled = app.isPackaged && process.platform === 'win32';
+  const updates = createUpdater({
+    updater: updatesEnabled ? require('electron-updater').autoUpdater : null,
+    version: app.getVersion(), enabled: updatesEnabled,
+    publish: (state) => {
+      if (window && !window.webContents.isDestroyed()) window.webContents.send('updates:state', state);
+    }
+  });
+  for (const action of ['snapshot', 'check', 'download', 'install', 'setSessionActive']) {
+    ipcMain.handle('updates:' + action, (event, value) => {
+      if (!ownWindow(event)) throw new Error('Accès refusé.');
+      if (action === 'setSessionActive' && typeof value !== 'boolean') throw new Error('État invalide.');
+      return updates[action](value);
+    });
+  }
+  window.webContents.once('did-finish-load', () => {
+    const timer = setTimeout(() => {
+      if (updates.snapshot().phase === 'idle') updates.check();
+    }, 2500);
+    timer.unref();
   });
 
   window.on('closed', () => { window = null; });

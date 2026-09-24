@@ -5,6 +5,8 @@ desktop/renderer/bundle.js.map
 desktop/dist/
 desktop/.tmp-integration-result.json
 desktop/.tmp-native-result.json
+desktop/.tmp-updates-result.json
+desktop/.tmp-updates-*/
 signaling/.env
 desktop/.env
 __pycache__/

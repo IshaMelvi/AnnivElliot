@@ -31,6 +31,7 @@ AnnivElliot/
    ├─ package.json
    ├─ main.js
    ├─ preload.js
+   ├─ updater.cjs         # mises à jour GitHub Releases, côté Electron
    ├─ assets/            # logo utilisé par l'interface et l'icône Windows
    └─ renderer/
       ├─ index.html
@@ -73,6 +74,7 @@ Pour vérifier la connexion et les changements de flux sans utiliser de vrais p�
 ```powershell
 npm.cmd test
 npm.cmd run test:integration
+npm.cmd run test:updates
 ```
 
 Le test Windows natif vérifie la recherche étendue, la restauration et la réception d'une image d'une petite fenêtre de test temporaire (aucune autre fenêtre n'est capturée) : `npm.cmd run test:native`.
@@ -83,7 +85,7 @@ Sur Windows, pour produire l'installateur :
 npm.cmd run build:win
 ```
 
-Le fichier `desktop/dist/CherubLink-Setup.exe` est à téléverser dans une GitHub Release publiée. Le lien du site fonctionnera alors. Pour tester avec deux personnes, lancez chacun l'application et choisissez le même nom de salon. Seul le micro est demandé à l'entrée ; la webcam et l'écran s'activent ensuite par leurs boutons. Un nom long et difficile à deviner sert de secret partagé.
+Les trois fichiers `desktop/dist/CherubLink-Setup.exe`, `desktop/dist/latest.yml` et `desktop/dist/CherubLink-Setup.exe.blockmap` sont à joindre à chaque GitHub Release publiée, depuis le même build (procédure ci-dessous). La commande construit localement, sans publier automatiquement. Le lien du site garde le même nom d'installateur. Pour tester avec deux personnes, lancez chacun l'application et choisissez le même nom de salon. Seul le micro est demandé à l'entrée ; la webcam et l'écran s'activent ensuite par leurs boutons. Un nom long et difficile à deviner sert de secret partagé.
 
 Le nom affiché devient CherubLink. L'identifiant d'installation `ch.annivelliot.stream`, le dossier de profil `%APPDATA%/annivelliot-desktop` et la clé des préférences existante sont conservés pour retrouver les profils et les volumes enregistrés. Le dépôt GitHub et l'adresse du serveur Render gardent leurs noms actuels.
 
@@ -120,9 +122,34 @@ Le nom affiché devient CherubLink. L'identifiant d'installation `ch.annivelliot
 
 Les corrections de reprise de capture de la version 1.2.0 sont conservées.
 
-## Publier la version 1.3.0
+## Publier la version 1.4.0 avec les mises à jour intégrées
 
-1. Pousser les modifications de `desktop/` **et de `signaling/`**, notamment le nouveau `signaling/chat.cjs`.
-2. Redéployer le service Render sur ce commit (automatiquement si l'auto-déploiement est activé). **Le nouveau serveur est nécessaire pour le chat.** Une ancienne version continuera la signalisation mais ne répondra pas aux messages du chat.
-3. Construire avec `cd desktop` puis `npm.cmd run build:win`. Créer la release **v1.3.0** et joindre `desktop/dist/CherubLink-Setup.exe`.
-4. Installer 1.3.0 sur les deux ordinateurs pour que chacun envoie son micro et sa webcam dans le même groupe AV. Les médias continuent de circuler directement entre les deux utilisateurs ; Render relaie maintenant la signalisation et les messages texte, sans les stocker.
+1. Pousser les modifications, y compris les nouveaux fichiers et `desktop/package-lock.json`. La version de l'application est déjà **1.4.0**.
+2. Construire depuis `desktop/` avec `npm.cmd install` puis `npm.cmd run build:win` si nécessaire.
+3. Sur GitHub, créer une **nouvelle release** avec le tag **v1.4.0**, ciblant le commit poussé. Joindre les **trois fichiers du même build** :
+   - `desktop/dist/CherubLink-Setup.exe`
+   - `desktop/dist/latest.yml`
+   - `desktop/dist/CherubLink-Setup.exe.blockmap`
+4. Publier la release comme version stable et **Latest**, après avoir ajouté tous les fichiers. Ne pas cocher **Pre-release**. Conserver les anciennes releases. Ne pas retoucher `latest.yml` : il contient notamment la version et l'empreinte SHA-512 de l'installateur.
+5. **Installer manuellement cette 1.4.0 une seule fois sur les deux ordinateurs**, par-dessus l'ancienne installation : fermer CherubLink, lancer le nouvel `.exe`, garder le même dossier et le même type d'installation (utilisateur ou tous les utilisateurs). Aucun besoin de désinstaller. Le profil et les préférences sont conservés.
+
+À chaque lancement de la version installée, CherubLink recherche une nouvelle version stable sur le dépôt public `IshaMelvi/AnnivElliot`. Une indication apparaît à l'accueil et en bas de la colonne du salon. **Paramètres → Mises à jour** affiche la version et permet aussi une recherche manuelle. Le bouton **Télécharger la mise à jour** montre la progression, puis **Redémarrer et installer** installe et relance l'application. Fermer l'application seul ne déclenche pas l'installation.
+
+Le téléchargement et l'installation sont bloqués pendant un salon. Si vous entrez dans un salon pendant le téléchargement, celui-ci est annulé ; après le salon, relancez la recherche puis le téléchargement. Un installateur déjà téléchargé et vérifié est réutilisé lors d'une nouvelle demande après relancement. Une erreur réseau ou un fichier invalide laisse l'application utilisable et permet de réessayer. `npm.cmd start` désactive volontairement les mises à jour : elles se testent dans la version installée.
+
+**Render ne nécessite aucune modification pour les mises à jour.** GitHub héberge les installateurs et leurs métadonnées ; aucun token GitHub n'est embarqué. Si le serveur 1.3.0 avec `signaling/chat.cjs` est déjà déployé, le conserver. Ce serveur reste nécessaire au chat et à la signalisation.
+
+### Releases suivantes
+
+Depuis `desktop/`, incrémenter la version avant de construire, par exemple pour **1.4.1** :
+
+```powershell
+npm.cmd version patch --no-git-tag-version
+npm.cmd run build:win
+```
+
+Commiter/pousser les changements, puis créer une nouvelle release **v1.4.1** avec les trois nouveaux fichiers. Le numéro du tag doit correspondre à `desktop/package.json` ; changer seulement le tag ne change pas la version de l'application. Ne pas remplacer les fichiers d'une ancienne release déjà publiée : les applications comparent les numéros de version. Les utilisateurs ayant installé 1.4.0 pourront ensuite télécharger et installer cette mise à jour depuis CherubLink.
+
+### Vérifications des mises à jour
+
+`npm.cmd test` vérifie les transitions, les erreurs, l'annulation et l'exclusion entre salon et installation. `npm.cmd run test:updates` lance Electron avec un profil isolé et un serveur HTTP local : détection d'une nouvelle version, téléchargement réel par `electron-updater`, refus d'un fichier corrompu, cache après relancement, refus des versions anciennes et contrôles dans l'interface. Aucun installateur n'est exécuté par ces tests. La chaîne complète de téléchargement depuis GitHub et de remplacement de la version installée doit encore être vérifiée après publication d'une release suivante.
